@@ -1,12 +1,15 @@
 # Group Chat App
 
-Next.js + TypeScript group chat starter with Signup/Login UI and Neon Postgres auth APIs.
+Next.js + TypeScript group chat with Signup/Login UI, Neon Postgres auth, and persisted chat messages.
 
 ## Features (this milestone)
 
 - Welcome, Signup, and Login screens (white / purple / soft green UI)
 - `POST /api/auth/signup` — name, email, phone, password (bcrypt hashed)
 - `POST /api/auth/login` — email or phone + password → JWT
+- `GET /api/messages` — list all stored messages (JWT required)
+- `POST /api/messages` — save a message for the authenticated user (JWT required)
+- Chat page loads history from the database on mount (survives refresh)
 - Neon Lakebase Postgres persistence via Drizzle ORM
 
 ## Stack
@@ -84,6 +87,54 @@ Both return:
 {
   "token": "<jwt>",
   "user": { "id": "...", "name": "...", "email": "...", "phone": "..." }
+}
+```
+
+## Messages API
+
+All message endpoints require:
+
+```http
+Authorization: Bearer <jwt>
+```
+
+### List messages
+
+`GET /api/messages`
+
+```json
+{
+  "messages": [
+    {
+      "id": "...",
+      "text": "Hello team",
+      "senderId": "...",
+      "createdAt": "2026-10-29T08:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Send message
+
+`POST /api/messages`
+
+```json
+{
+  "text": "Hello team"
+}
+```
+
+Returns:
+
+```json
+{
+  "message": {
+    "id": "...",
+    "text": "Hello team",
+    "senderId": "...",
+    "createdAt": "2026-10-29T08:00:00.000Z"
+  }
 }
 ```
 

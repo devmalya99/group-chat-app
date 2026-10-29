@@ -3,18 +3,22 @@
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 
 interface MessageComposerProps {
-  onSend: (text: string) => void;
+  onSend: (text: string) => void | Promise<void>;
+  disabled?: boolean;
 }
 
-export function MessageComposer({ onSend }: MessageComposerProps) {
+export function MessageComposer({
+  onSend,
+  disabled = false,
+}: MessageComposerProps) {
   const [text, setText] = useState("");
 
   function submit() {
     const next = text.trim();
-    if (!next) {
+    if (!next || disabled) {
       return;
     }
-    onSend(next);
+    void onSend(next);
     setText("");
   }
 
@@ -51,7 +55,8 @@ export function MessageComposer({ onSend }: MessageComposerProps) {
             onChange={(event) => setText(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
-            className="max-h-28 min-h-[28px] w-full resize-none bg-transparent text-[15px] text-slate-800 outline-none placeholder:text-slate-400"
+            disabled={disabled}
+            className="max-h-28 min-h-[28px] w-full resize-none bg-transparent text-[15px] text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="button"
@@ -65,7 +70,8 @@ export function MessageComposer({ onSend }: MessageComposerProps) {
         {text.trim() ? (
           <button
             type="submit"
-            className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-white shadow-[0_10px_24px_rgba(109,91,255,0.35)]"
+            disabled={disabled}
+            className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-white shadow-[0_10px_24px_rgba(109,91,255,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
             aria-label="Send message"
           >
             <SendIcon />
@@ -73,7 +79,8 @@ export function MessageComposer({ onSend }: MessageComposerProps) {
         ) : (
           <button
             type="button"
-            className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-white shadow-[0_10px_24px_rgba(109,91,255,0.35)]"
+            disabled={disabled}
+            className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-white shadow-[0_10px_24px_rgba(109,91,255,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
             aria-label="Voice message"
           >
             <MicIcon />
