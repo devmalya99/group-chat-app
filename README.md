@@ -1,6 +1,6 @@
 # Group Chat App
 
-Next.js + TypeScript group chat with Signup/Login UI, Neon Postgres auth, and persisted chat messages.
+Next.js + TypeScript group chat with Signup/Login UI, Neon Postgres auth, persisted messages, and classic WebSocket live updates.
 
 ## Features (this milestone)
 
@@ -9,7 +9,8 @@ Next.js + TypeScript group chat with Signup/Login UI, Neon Postgres auth, and pe
 - `POST /api/auth/login` — email or phone + password → JWT
 - `GET /api/messages` — list all stored messages (JWT required)
 - `POST /api/messages` — save a message for the authenticated user (JWT required)
-- Chat page loads history from the database on mount (survives refresh)
+- Classic WebSocket live chat on the same port via custom `server.js` (`ws`, not Socket.io)
+- Chat page loads history from the database, then receives new messages live
 - Neon Lakebase Postgres persistence via Drizzle ORM
 
 ## Stack
@@ -17,6 +18,7 @@ Next.js + TypeScript group chat with Signup/Login UI, Neon Postgres auth, and pe
 - Next.js (App Router) + TypeScript + Tailwind CSS
 - Neon Postgres (`DATABASE_URL`)
 - Drizzle ORM + bcryptjs + JWT + Zod
+- Classic WebSockets via [`ws`](https://github.com/websockets/ws)
 
 ## Setup
 
@@ -47,13 +49,17 @@ npx neon@latest deploy
 npm run db:push
 ```
 
-4. Run locally:
+4. Run with live WebSockets (required for realtime chat):
 
 ```bash
-npm run dev
+npm run dev:server
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+WebSocket endpoint (same port): `ws://localhost:3000/ws?token=<jwt>`
+
+> `npm run dev` starts Next alone and does **not** enable WebSockets. Use `npm run dev:server` for live messaging.
 
 ## Auth API
 
@@ -115,7 +121,7 @@ Authorization: Bearer <jwt>
 }
 ```
 
-### Send message
+### Send message (HTTP fallback)
 
 `POST /api/messages`
 
@@ -125,10 +131,27 @@ Authorization: Bearer <jwt>
 }
 ```
 
-Returns:
+The chat UI sends over WebSocket for live fan-out. HTTP POST remains available.
+
+## WebSocket protocol
+
+Connect:
+
+```text
+ws://localhost:3000/ws?token=<jwt>
+```
+
+Client → server:
+
+```json
+{ "type": "chat.send", "text": "Hello team" }
+```
+
+Server → all clients:
 
 ```json
 {
+  "type": "chat.message",
   "message": {
     "id": "...",
     "text": "Hello team",
@@ -142,7 +165,9 @@ Returns:
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Start Next.js |
+| `npm run dev:server` | Custom Node server: Next + WebSocket on one port |
+| `npm run start:server` | Production custom server after `npm run build` |
+| `npm run dev` | Next only (no WebSocket) |
 | `npm run build` | Production build |
 | `npm run db:push` | Apply Drizzle schema to Neon |
 | `npx neon@latest deploy` | Sync Neon config / env |

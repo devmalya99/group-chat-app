@@ -34,3 +34,18 @@ export interface CreateMessagePayload {
 export interface MessageErrorResponse {
   message: string;
 }
+
+export type WsClientEvent = {
+  type: "chat.send";
+  text: string;
+};
+
+export type WsServerEvent =
+  | {
+      type: "chat.message";
+      message: StoredMessage;
+    }
+  | {
+      type: "error";
+      message: string;
+    };
