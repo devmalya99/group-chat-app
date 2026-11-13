@@ -1,5 +1,7 @@
 import type {
   CreateMessagePayload,
+  LookupUser,
+  LookupUserResponse,
   MessageErrorResponse,
   MessagesListResponse,
   StoredMessage,
@@ -53,4 +55,18 @@ export async function sendMessageRequest(
 
   const data = await parseJsonResponse<{ message: StoredMessage }>(response);
   return data.message;
+}
+
+export async function lookupUserByEmail(
+  token: string,
+  email: string,
+): Promise<LookupUser> {
+  const params = new URLSearchParams({ email: email.trim() });
+  const response = await fetch(`/api/users/by-email?${params.toString()}`, {
+    method: "GET",
+    headers: authHeaders(token),
+  });
+
+  const data = await parseJsonResponse<LookupUserResponse>(response);
+  return data.user;
 }

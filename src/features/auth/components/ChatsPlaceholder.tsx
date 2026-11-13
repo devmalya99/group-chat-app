@@ -20,7 +20,9 @@ export function ChatsPlaceholder() {
     }
 
     setSession(current);
-  }, [router]);
+    // Intentionally run once on mount — `router` identity is not a stable dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only session bootstrap
+  }, []);
 
   function handleLogout() {
     clearAuthSession();

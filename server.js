@@ -2,7 +2,7 @@ const { createServer } = require("http");
 const { parse } = require("url");
 const next = require("next");
 const { config } = require("dotenv");
-const { attachChatWebSocket } = require("./server/chat-ws");
+const { attachChatSocket } = require("./server/socket-io");
 
 config({ path: ".env.local" });
 
@@ -28,11 +28,11 @@ app
       }
     });
 
-    attachChatWebSocket(server, upgradeHandler);
+    attachChatSocket(server, upgradeHandler);
 
     server.listen(port, () => {
       console.info(
-        `[server] Ready on http://${hostname}:${port} (WebSocket path /ws)`,
+        `[server] Ready on http://${hostname}:${port} (Socket.IO path /socket.io)`,
       );
     });
   })

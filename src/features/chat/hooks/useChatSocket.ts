@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  WS_EVENT,
-  WS_RECONNECT_DELAY_MS,
-} from "../constants/chat.constants";
-import type { StoredMessage, WsServerEvent } from "../types/chat.types";
-import { buildChatWebSocketUrl } from "../utils/wsUrl";
+import { io, type Socket } from "socket.io-client";
+import { getAuthSession } from "@/features/auth/utils/session";
+import { SOCKET_EVENT, SOCKET_PATH } from "../constants/chat.constants";
+import type {
+  ChatErrorPayload,
+  ChatMessagePayload,
+  JoinRoomPayload,
+  RoomJoinedPayload,
+  StoredMessage,
+} from "../types/chat.types";
+import { buildChatSocketUrl } from "../utils/socketUrl";
 
 interface UseChatSocketOptions {
   token: string | null;
@@ -17,7 +22,9 @@ interface UseChatSocketOptions {
 
 interface UseChatSocketResult {
   connected: boolean;
+  activeRoomId: string | null;
   sendChatMessage: (text: string) => boolean;
+  joinRoom: (roomId: string) => boolean;
 }
 
 export function useChatSocket({
@@ -27,8 +34,8 @@ export function useChatSocket({
   onError,
 }: UseChatSocketOptions): UseChatSocketResult {
   const [connected, setConnected] = useState(false);
-  const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const onMessageRef = useRef(onMessage);
   const onErrorRef = useRef(onError);
 
@@ -45,108 +52,100 @@ export function useChatSocket({
       return;
     }
 
-    let cancelled = false;
+    // Pass JWT during the Socket.IO handshake (auth.token).
+    // Session is stored under AUTH_STORAGE_KEY; prefer the hook token, fall back to session.
+    const handshakeToken = token || getAuthSession()?.token || null;
 
-    function clearReconnectTimer() {
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
+    if (!handshakeToken) {
+      onErrorRef.current?.("Authorization token is missing");
+      return;
     }
 
-    function connect() {
-      if (cancelled) {
+    const socket = io(buildChatSocketUrl(), {
+      path: SOCKET_PATH,
+      auth: {
+        token: handshakeToken,
+      },
+      autoConnect: true,
+      transports: ["websocket", "polling"],
+    });
+
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      setConnected(true);
+    });
+
+    socket.on("disconnect", () => {
+      setConnected(false);
+      setActiveRoomId(null);
+    });
+
+    socket.on("connect_error", (error) => {
+      setConnected(false);
+      setActiveRoomId(null);
+      const message =
+        error?.message && error.message !== "xhr poll error"
+          ? error.message
+          : "Live connection error. Use npm run dev:server for Socket.IO.";
+      onErrorRef.current?.(message);
+    });
+
+    socket.on(SOCKET_EVENT.chatMessage, (payload: ChatMessagePayload) => {
+      if (!payload?.message) {
         return;
       }
+      onMessageRef.current(payload.message);
+    });
 
-      clearReconnectTimer();
+    socket.on(SOCKET_EVENT.roomJoined, (payload: RoomJoinedPayload) => {
+      if (!payload?.roomId) {
+        return;
+      }
+      setActiveRoomId(payload.roomId);
+    });
 
-      const socket = new WebSocket(buildChatWebSocketUrl(token as string));
-      socketRef.current = socket;
-
-      socket.onopen = () => {
-        if (!cancelled) {
-          setConnected(true);
-        }
-      };
-
-      socket.onmessage = (event) => {
-        let payload: WsServerEvent;
-
-        try {
-          payload = JSON.parse(String(event.data)) as WsServerEvent;
-        } catch {
-          onErrorRef.current?.("Received invalid live message");
-          return;
-        }
-
-        if (payload.type === WS_EVENT.chatMessage) {
-          onMessageRef.current(payload.message);
-          return;
-        }
-
-        if (payload.type === WS_EVENT.error) {
-          onErrorRef.current?.(payload.message);
-        }
-      };
-
-      socket.onerror = () => {
-        onErrorRef.current?.(
-          "Live connection error. Use npm run dev:server for WebSockets.",
-        );
-      };
-
-      socket.onclose = () => {
-        setConnected(false);
-        socketRef.current = null;
-
-        if (cancelled) {
-          return;
-        }
-
-        reconnectTimerRef.current = setTimeout(() => {
-          connect();
-        }, WS_RECONNECT_DELAY_MS);
-      };
-    }
-
-    connect();
+    socket.on(SOCKET_EVENT.chatError, (payload: ChatErrorPayload) => {
+      onErrorRef.current?.(payload?.message || "Live chat error");
+    });
 
     return () => {
-      cancelled = true;
-      clearReconnectTimer();
-      const socket = socketRef.current;
+      socket.removeAllListeners();
+      socket.disconnect();
       socketRef.current = null;
-      if (socket) {
-        socket.onopen = null;
-        socket.onmessage = null;
-        socket.onerror = null;
-        socket.onclose = null;
-        socket.close();
-      }
       setConnected(false);
+      setActiveRoomId(null);
     };
   }, [enabled, token]);
 
   function sendChatMessage(text: string): boolean {
     const socket = socketRef.current;
 
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || !socket.connected) {
       return false;
     }
 
-    socket.send(
-      JSON.stringify({
-        type: WS_EVENT.chatSend,
-        text,
-      }),
-    );
+    socket.emit(SOCKET_EVENT.chatSend, { text });
+    return true;
+  }
 
+  function joinRoom(roomId: string): boolean {
+    const socket = socketRef.current;
+    const trimmed = roomId.trim();
+
+    if (!socket || !socket.connected || !trimmed) {
+      return false;
+    }
+
+    const payload: JoinRoomPayload = { roomId: trimmed };
+    socket.emit(SOCKET_EVENT.joinRoom, payload);
     return true;
   }
 
   return {
     connected,
+    activeRoomId,
     sendChatMessage,
+    joinRoom,
   };
 }

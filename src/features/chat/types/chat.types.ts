@@ -35,17 +35,32 @@ export interface MessageErrorResponse {
   message: string;
 }
 
-export type WsClientEvent = {
-  type: "chat.send";
+export interface ChatSendPayload {
   text: string;
-};
+}
 
-export type WsServerEvent =
-  | {
-      type: "chat.message";
-      message: StoredMessage;
-    }
-  | {
-      type: "error";
-      message: string;
-    };
+export interface ChatMessagePayload {
+  message: StoredMessage;
+}
+
+export interface ChatErrorPayload {
+  message: string;
+}
+
+export interface JoinRoomPayload {
+  roomId: string;
+}
+
+export interface RoomJoinedPayload {
+  roomId: string;
+}
+
+export interface LookupUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface LookupUserResponse {
+  user: LookupUser;
+}

@@ -8,12 +8,12 @@ export const DEMO_CONTACT: ChatContact = {
 
 export const MESSAGE_TEXT_MAX_LENGTH = 2000;
 
-export const WS_PATH = "/ws";
+export const SOCKET_PATH = "/socket.io";
 
-export const WS_EVENT = {
-  chatSend: "chat.send",
-  chatMessage: "chat.message",
-  error: "error",
+export const SOCKET_EVENT = {
+  chatSend: "chat:send",
+  chatMessage: "chat:message",
+  chatError: "chat:error",
+  joinRoom: "join_room",
+  roomJoined: "room:joined",
 } as const;
-
-export const WS_RECONNECT_DELAY_MS = 2000;

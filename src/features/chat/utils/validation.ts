@@ -9,6 +9,12 @@ export const createMessageSchema = z.object({
     .max(MESSAGE_TEXT_MAX_LENGTH, "Message is too long"),
 });
 
+export const lookupEmailSchema = z
+  .string()
+  .trim()
+  .email("Enter a valid email address")
+  .toLowerCase();
+
 export type CreateMessageInput = z.infer<typeof createMessageSchema>;
 
 export function getFirstZodError(error: z.ZodError): string {
