@@ -114,3 +114,35 @@ export interface FileUploadResponse {
   fileCategory: FileCategory;
   fileSize: number;
 }
+
+/** Shared AI conversation context (predict + smart replies). */
+export type ChatAiMessageFrom = "self" | "peer";
+
+export interface ChatAiContextMessage {
+  from: ChatAiMessageFrom;
+  text: string;
+}
+
+export interface PredictTypingRequest {
+  roomId: string;
+  draft: string;
+  recentMessages?: ChatAiContextMessage[];
+}
+
+export interface PredictTypingResponse {
+  suggestion: string;
+}
+
+export interface SmartRepliesLatestIncomingMessage {
+  text: string;
+}
+
+export interface SmartRepliesRequest {
+  roomId: string;
+  latestIncomingMessage: SmartRepliesLatestIncomingMessage;
+  recentMessages?: ChatAiContextMessage[];
+}
+
+export interface SmartRepliesResponse {
+  suggestions: string[];
+}

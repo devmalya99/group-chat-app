@@ -1,7 +1,11 @@
 import { z } from "zod";
 import {
+  CHAT_AI_CONTEXT_MESSAGE_LIMIT,
+  CHAT_AI_CONTEXT_TEXT_MAX_LENGTH,
   MESSAGE_TEXT_MAX_LENGTH,
   MESSAGE_TYPE,
+  PREDICTIVE_TYPING_MIN_DRAFT_LENGTH,
+  SMART_REPLIES_MAX_SUGGESTIONS,
 } from "../constants/chat.constants";
 import {
   getFileSizeLimitLabel,
@@ -108,9 +112,67 @@ export const lookupEmailSchema = z
   .email("Enter a valid email address")
   .toLowerCase();
 
+const chatAiContextMessageSchema = z.object({
+  from: z.enum(["self", "peer"]),
+  text: z
+    .string()
+    .trim()
+    .min(1, "Context message cannot be empty")
+    .max(CHAT_AI_CONTEXT_TEXT_MAX_LENGTH, "Context message is too long"),
+});
+
+const chatAiRecentMessagesSchema = z
+  .array(chatAiContextMessageSchema)
+  .max(
+    CHAT_AI_CONTEXT_MESSAGE_LIMIT,
+    `At most ${CHAT_AI_CONTEXT_MESSAGE_LIMIT} recent messages are allowed`,
+  )
+  .optional()
+  .default([]);
+
+export const predictTypingSchema = z.object({
+  roomId: z.string().trim().min(1, "Room ID is required"),
+  draft: z
+    .string()
+    .min(PREDICTIVE_TYPING_MIN_DRAFT_LENGTH, "Draft is too short")
+    .max(MESSAGE_TEXT_MAX_LENGTH, "Draft is too long"),
+  recentMessages: chatAiRecentMessagesSchema,
+});
+
+export const predictTypingResponseSchema = z.object({
+  suggestion: z.string(),
+});
+
+export const smartRepliesSchema = z.object({
+  roomId: z.string().trim().min(1, "Room ID is required"),
+  latestIncomingMessage: z.object({
+    text: z
+      .string()
+      .trim()
+      .min(1, "Latest incoming message cannot be empty")
+      .max(
+        CHAT_AI_CONTEXT_TEXT_MAX_LENGTH,
+        "Latest incoming message is too long",
+      ),
+  }),
+  recentMessages: chatAiRecentMessagesSchema,
+});
+
+export const smartRepliesResponseSchema = z.object({
+  suggestions: z.array(z.string()).max(SMART_REPLIES_MAX_SUGGESTIONS),
+});
+
 export type CreateMessageInput = z.infer<typeof createMessageSchema>;
 export type ChatSendInput = z.infer<typeof chatSendSchema>;
 export type FileUploadMetaInput = z.infer<typeof fileUploadMetaSchema>;
+export type PredictTypingInput = z.infer<typeof predictTypingSchema>;
+export type PredictTypingResponseInput = z.infer<
+  typeof predictTypingResponseSchema
+>;
+export type SmartRepliesInput = z.infer<typeof smartRepliesSchema>;
+export type SmartRepliesResponseInput = z.infer<
+  typeof smartRepliesResponseSchema
+>;
 
 export function getFirstZodError(error: z.ZodError): string {
   return error.issues[0]?.message ?? "Invalid input";

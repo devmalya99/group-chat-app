@@ -1,3 +1,7 @@
+import {
+  PREDICTIVE_TYPING_TIMEOUT_MS,
+  SMART_REPLIES_TIMEOUT_MS,
+} from "../constants/chat.constants";
 import type {
   CreateMessagePayload,
   FetchMessagesOptions,
@@ -6,8 +10,24 @@ import type {
   LookupUserResponse,
   MessageErrorResponse,
   MessagesListResponse,
+  PredictTypingRequest,
+  PredictTypingResponse,
+  SmartRepliesRequest,
+  SmartRepliesResponse,
   StoredMessage,
 } from "../types/chat.types";
+import { isAbortError } from "../utils/isAbortError";
+import {
+  predictTypingResponseSchema,
+  smartRepliesResponseSchema,
+} from "../utils/validation";
+import type { z } from "zod";
+
+const EMPTY_PREDICT_RESPONSE: PredictTypingResponse = { suggestion: "" };
+const CLIENT_PREDICT_TIMEOUT_MS = PREDICTIVE_TYPING_TIMEOUT_MS + 1000;
+
+const EMPTY_SMART_REPLIES_RESPONSE: SmartRepliesResponse = { suggestions: [] };
+const CLIENT_SMART_REPLIES_TIMEOUT_MS = SMART_REPLIES_TIMEOUT_MS + 1000;
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T | MessageErrorResponse;
@@ -138,4 +158,143 @@ export async function deleteChatFileMessage(
   });
 
   await parseJsonResponse<{ ok: boolean }>(response);
+}
+
+/** Auth/membership failures that must not be soft-swallowed as empty AI results. */
+export class ChatAiHttpError extends Error {
+  readonly status: number;
+  readonly feature: "predict" | "smart-replies";
+
+  constructor(feature: "predict" | "smart-replies", status: number) {
+    super(`Chat AI (${feature}) failed with status ${status}`);
+    this.name = "ChatAiHttpError";
+    this.feature = feature;
+    this.status = status;
+  }
+}
+
+export function isChatAiHttpError(error: unknown): error is ChatAiHttpError {
+  return error instanceof ChatAiHttpError;
+}
+
+async function softFailAiPost<TSchema extends z.ZodType>(input: {
+  feature: "predict" | "smart-replies";
+  path: string;
+  token: string;
+  body: unknown;
+  schema: TSchema;
+  empty: z.infer<TSchema>;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<z.infer<TSchema>> {
+  if (input.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+
+  const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, timeoutSignal])
+    : timeoutSignal;
+
+  try {
+    const response = await fetch(input.path, {
+      method: "POST",
+      headers: authHeaders(input.token),
+      body: JSON.stringify(input.body),
+      signal,
+    });
+
+    if (input.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new ChatAiHttpError(input.feature, response.status);
+      }
+      return input.empty;
+    }
+
+    const data: unknown = await response.json();
+    const parsed = input.schema.safeParse(data);
+    if (!parsed.success) {
+      return input.empty;
+    }
+
+    return parsed.data;
+  } catch (error) {
+    if (isChatAiHttpError(error)) {
+      throw error;
+    }
+
+    if (input.signal?.aborted) {
+      throw isAbortError(error)
+        ? error
+        : new DOMException("The operation was aborted.", "AbortError");
+    }
+
+    if (timeoutSignal.aborted) {
+      return input.empty;
+    }
+
+    if (isAbortError(error)) {
+      throw error;
+    }
+
+    return input.empty;
+  }
+}
+
+/**
+ * Predictive typing request.
+ * - Caller abort → throws AbortError
+ * - 401 / 403 → throws ChatAiHttpError (hook handles session / no-retry)
+ * - Timeout / 429 / 5xx / other → `{ suggestion: "" }` (chat-safe)
+ */
+export async function predictTyping(
+  token: string,
+  request: PredictTypingRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<PredictTypingResponse> {
+  return softFailAiPost({
+    feature: "predict",
+    path: "/api/chat/predict",
+    token,
+    body: {
+      roomId: request.roomId,
+      draft: request.draft,
+      recentMessages: request.recentMessages ?? [],
+    },
+    schema: predictTypingResponseSchema,
+    empty: EMPTY_PREDICT_RESPONSE,
+    timeoutMs: CLIENT_PREDICT_TIMEOUT_MS,
+    signal: options.signal,
+  });
+}
+
+/**
+ * Smart Replies request.
+ * - Caller abort → throws AbortError
+ * - 401 / 403 → throws ChatAiHttpError (hook handles session / no-retry)
+ * - Timeout / 4xx/5xx / parse → `{ suggestions: [] }` (chat-safe)
+ */
+export async function fetchSmartReplies(
+  token: string,
+  request: SmartRepliesRequest,
+  options: { signal?: AbortSignal } = {},
+): Promise<SmartRepliesResponse> {
+  return softFailAiPost({
+    feature: "smart-replies",
+    path: "/api/chat/smart-replies",
+    token,
+    body: {
+      roomId: request.roomId,
+      latestIncomingMessage: request.latestIncomingMessage,
+      recentMessages: request.recentMessages ?? [],
+    },
+    schema: smartRepliesResponseSchema,
+    empty: EMPTY_SMART_REPLIES_RESPONSE,
+    timeoutMs: CLIENT_SMART_REPLIES_TIMEOUT_MS,
+    signal: options.signal,
+  });
 }

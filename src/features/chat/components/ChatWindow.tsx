@@ -1,6 +1,9 @@
 "use client";
 
-import { DEMO_CONTACT } from "../constants/chat.constants";
+import {
+  DEMO_CONTACT,
+  isSmartRepliesEnabledOnClient,
+} from "../constants/chat.constants";
 import { useChatMessages } from "../hooks/useChatMessages";
 import type { ChatContact } from "../types/chat.types";
 import { ChatHeader } from "./ChatHeader";
@@ -117,6 +120,11 @@ export function ChatWindow() {
           disabled={!canSend}
           uploading={uploading}
           placeholder={composerPlaceholder}
+          messages={messages}
+          roomId={activeRoomId}
+          currentUserId={currentUserId}
+          predictiveEnabled={canSend}
+          smartRepliesEnabled={canSend && isSmartRepliesEnabledOnClient()}
         />
       </section>
     </main>
