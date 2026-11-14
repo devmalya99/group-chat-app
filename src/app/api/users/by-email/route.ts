@@ -25,12 +25,26 @@ export async function GET(request: Request) {
       );
     }
 
+    if (parsed.data === authUser.email.trim().toLowerCase()) {
+      return NextResponse.json(
+        { message: "You cannot start a personal chat with yourself" },
+        { status: 400 },
+      );
+    }
+
     const user = await findUserByEmail(parsed.data);
 
     if (!user) {
       return NextResponse.json(
         { message: "No user found with that email" },
         { status: 404 },
+      );
+    }
+
+    if (user.id === authUser.id) {
+      return NextResponse.json(
+        { message: "You cannot start a personal chat with yourself" },
+        { status: 400 },
       );
     }
 

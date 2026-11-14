@@ -4,11 +4,17 @@ import {
   createMessage,
   listMessages,
 } from "@/features/chat/api/messages.service";
+import { MESSAGE_TYPE } from "@/features/chat/constants/chat.constants";
+import { isRoomMember } from "@/features/chat/utils/isRoomMember";
 import {
   createMessageSchema,
   getFirstZodError,
 } from "@/features/chat/utils/validation";
 import { logger } from "@/services/logging/logger";
+import {
+  createSignedMediaUrl,
+  isMediaKeyForRoom,
+} from "@/services/storage/uploads";
 
 export async function GET(request: Request) {
   try {
@@ -18,7 +24,47 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const messages = await listMessages();
+    const { searchParams } = new URL(request.url);
+    const roomId = searchParams.get("roomId")?.trim() || undefined;
+
+    if (!roomId) {
+      return NextResponse.json(
+        { message: "roomId is required" },
+        { status: 400 },
+      );
+    }
+
+    if (!isRoomMember(roomId, user.email)) {
+      return NextResponse.json(
+        { message: "You can only view messages in rooms you belong to" },
+        { status: 403 },
+      );
+    }
+
+    const rows = await listMessages(roomId);
+    const messages = await Promise.all(
+      rows.map(async (message) => {
+        if (
+          message.type !== MESSAGE_TYPE.media ||
+          !message.mediaKey ||
+          !isMediaKeyForRoom(message.mediaKey, roomId)
+        ) {
+          return message;
+        }
+
+        try {
+          const mediaUrl = await createSignedMediaUrl(message.mediaKey);
+          return { ...message, mediaUrl };
+        } catch (error) {
+          logger.error("Failed to sign media URL for message", {
+            messageId: message.id,
+            error: error instanceof Error ? error.message : "unknown",
+          });
+          return message;
+        }
+      }),
+    );
+
     return NextResponse.json({ messages }, { status: 200 });
   } catch (error) {
     logger.error("List messages failed", {
@@ -50,8 +96,16 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!isRoomMember(parsed.data.roomId, user.email)) {
+      return NextResponse.json(
+        { message: "You can only send messages in rooms you belong to" },
+        { status: 403 },
+      );
+    }
+
     const message = await createMessage({
       text: parsed.data.text,
+      roomId: parsed.data.roomId,
       senderId: user.id,
     });
 

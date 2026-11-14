@@ -7,6 +7,7 @@ import { SOCKET_EVENT, SOCKET_PATH } from "../constants/chat.constants";
 import type {
   ChatErrorPayload,
   ChatMessagePayload,
+  ChatSendPayload,
   JoinRoomPayload,
   RoomJoinedPayload,
   StoredMessage,
@@ -23,7 +24,7 @@ interface UseChatSocketOptions {
 interface UseChatSocketResult {
   connected: boolean;
   activeRoomId: string | null;
-  sendChatMessage: (text: string) => boolean;
+  sendChatMessage: (payload: ChatSendPayload) => boolean;
   joinRoom: (roomId: string) => boolean;
 }
 
@@ -52,8 +53,6 @@ export function useChatSocket({
       return;
     }
 
-    // Pass JWT during the Socket.IO handshake (auth.token).
-    // Session is stored under AUTH_STORAGE_KEY; prefer the hook token, fall back to session.
     const handshakeToken = token || getAuthSession()?.token || null;
 
     if (!handshakeToken) {
@@ -118,14 +117,14 @@ export function useChatSocket({
     };
   }, [enabled, token]);
 
-  function sendChatMessage(text: string): boolean {
+  function sendChatMessage(payload: ChatSendPayload): boolean {
     const socket = socketRef.current;
 
-    if (!socket || !socket.connected) {
+    if (!socket || !socket.connected || !activeRoomId) {
       return false;
     }
 
-    socket.emit(SOCKET_EVENT.chatSend, { text });
+    socket.emit(SOCKET_EVENT.chatSend, payload);
     return true;
   }
 
@@ -137,8 +136,8 @@ export function useChatSocket({
       return false;
     }
 
-    const payload: JoinRoomPayload = { roomId: trimmed };
-    socket.emit(SOCKET_EVENT.joinRoom, payload);
+    const joinPayload: JoinRoomPayload = { roomId: trimmed };
+    socket.emit(SOCKET_EVENT.joinRoom, joinPayload);
     return true;
   }
 

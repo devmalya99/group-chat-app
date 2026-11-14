@@ -13,12 +13,14 @@ export function ChatWindow() {
     messages,
     loading,
     sending,
+    uploading,
     joining,
     connected,
     activeRoomId,
     joinedPeer,
     error,
     sendMessage,
+    sendImage,
     joinPeerRoom,
   } = useChatMessages();
 
@@ -30,7 +32,14 @@ export function ChatWindow() {
       }
     : DEMO_CONTACT;
 
-  const canSend = !loading && !sending && connected && Boolean(activeRoomId);
+  const roomJoined = Boolean(activeRoomId);
+  const canSend =
+    !loading && !sending && !uploading && connected && roomJoined;
+  const composerPlaceholder = !roomJoined
+    ? "Join a room to send messages..."
+    : !connected
+      ? "Connecting to live chat..."
+      : "Type a message...";
 
   return (
     <main className="flex min-h-full flex-1 justify-center bg-[linear-gradient(180deg,#f4f1ff_0%,#ffffff_40%,#f3fff8_100%)] p-0 sm:p-6">
@@ -54,7 +63,7 @@ export function ChatWindow() {
             }`}
           >
             {connected
-              ? activeRoomId
+              ? roomJoined
                 ? "Live updates connected · room joined"
                 : "Live updates connected · join a room to chat"
               : "Connecting to live chat… (use npm run dev:server)"}
@@ -65,7 +74,7 @@ export function ChatWindow() {
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-slate-500">
             Loading…
           </div>
-        ) : !activeRoomId ? (
+        ) : !roomJoined ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
             <p className="text-sm font-medium text-slate-700">
               No room joined yet
@@ -85,7 +94,13 @@ export function ChatWindow() {
           </p>
         ) : null}
 
-        <MessageComposer onSend={sendMessage} disabled={!canSend} />
+        <MessageComposer
+          onSend={sendMessage}
+          onSendImage={sendImage}
+          disabled={!canSend}
+          uploading={uploading}
+          placeholder={composerPlaceholder}
+        />
       </section>
     </main>
   );

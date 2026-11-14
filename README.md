@@ -7,19 +7,21 @@ Next.js + TypeScript group chat with Signup/Login UI, Neon Postgres auth, persis
 - Welcome, Signup, and Login screens (white / purple / soft green UI)
 - `POST /api/auth/signup` — name, email, phone, password (bcrypt hashed)
 - `POST /api/auth/login` — email or phone + password → JWT
-- `GET /api/messages` — list all stored messages (JWT required)
-- `POST /api/messages` — save a message for the authenticated user (JWT required)
+- `GET /api/messages?roomId=` — room-scoped history (JWT + room membership required)
+- `POST /api/messages` — save a text message for a room (JWT required)
+- `POST /api/media/upload` — upload an image to Neon Object Storage (JWT + room membership)
+- `GET /api/media/access?roomId=&key=` — room-gated signed URL for private media
 - `GET /api/users/by-email?email=` — verify a peer email exists before joining a room (JWT required)
 - Socket.IO live chat on the same port via custom `server.js` (`server/socket-io/`)
 - Personal rooms: enter a peer email → lookup → deterministic room ID → `join_room`
-- Chat page loads history from the database, then receives new messages live
+- Image sharing via composer **+** button → Neon `uploads` bucket → Socket.IO fan-out
 - Neon Lakebase Postgres persistence via Drizzle ORM
 
 ## Stack
 
 - Next.js (App Router) + TypeScript + Tailwind CSS
-- Neon Postgres (`DATABASE_URL`)
-- Drizzle ORM + bcryptjs + JWT + Zod
+- Neon Postgres (`DATABASE_URL`) + Neon Object Storage (`uploads` bucket)
+- Drizzle ORM + bcryptjs + JWT + Zod + Files SDK
 - Realtime via [`socket.io`](https://socket.io/) + [`socket.io-client`](https://socket.io/docs/v4/client-api/)
 
 ## Socket.IO backend layout
@@ -116,22 +118,11 @@ All message endpoints require:
 Authorization: Bearer <jwt>
 ```
 
-### List messages
+### List messages (room-scoped)
 
-`GET /api/messages`
+`GET /api/messages?roomId=alice@email.com:bob@email.com`
 
-```json
-{
-  "messages": [
-    {
-      "id": "...",
-      "text": "Hello team",
-      "senderId": "...",
-      "createdAt": "2026-10-29T08:00:00.000Z"
-    }
-  ]
-}
-```
+Caller must be a participant in `roomId`. Media rows include a short-lived signed `mediaUrl`.
 
 ### Send message (HTTP fallback)
 
@@ -139,11 +130,38 @@ Authorization: Bearer <jwt>
 
 ```json
 {
-  "text": "Hello team"
+  "text": "Hello team",
+  "roomId": "alice@email.com:bob@email.com"
 }
 ```
 
 The chat UI sends over Socket.IO for live fan-out. HTTP POST remains available.
+
+## Media API
+
+Private Neon Object Storage bucket: `uploads` (max **5 MB**, JPEG/PNG/WebP/GIF).
+
+### Upload image
+
+`POST /api/media/upload` — `multipart/form-data`
+
+Fields: `file`, `roomId`
+
+Requires JWT + room membership. Response:
+
+```json
+{
+  "key": "rooms/alice%40email.com%3Abob%40email.com/<uuid>.jpg",
+  "contentType": "image/jpeg",
+  "url": "<signed-get-url>"
+}
+```
+
+### Access image (re-sign)
+
+`GET /api/media/access?roomId=...&key=...`
+
+Returns `{ "url": "<signed-get-url>" }` only if the caller belongs to that room and the key is under that room’s prefix.
 
 ## User lookup API
 
@@ -227,10 +245,21 @@ Server leaves any previous personal room on that socket, joins the new room, the
 { "roomId": "alice@email.com:bob@email.com" }
 ```
 
-Client → server event `chat:send`:
+Client → server event `chat:send` (text):
 
 ```json
 { "text": "Hello team" }
+```
+
+Client → server event `chat:send` (image, after HTTP upload):
+
+```json
+{
+  "text": "",
+  "mediaKey": "rooms/.../uuid.jpg",
+  "mediaContentType": "image/jpeg",
+  "mediaUrl": "<signed-get-url>"
+}
 ```
 
 Server → **only sockets in the sender’s active room** event `chat:message`:
@@ -239,6 +268,8 @@ Server → **only sockets in the sender’s active room** event `chat:message`:
 {
   "message": {
     "id": "...",
+    "roomId": "alice@email.com:bob@email.com",
+    "type": "text",
     "text": "Hello team",
     "senderId": "...",
     "createdAt": "2026-10-29T08:00:00.000Z"
@@ -246,7 +277,7 @@ Server → **only sockets in the sender’s active room** event `chat:message`:
 }
 ```
 
-Clients that have not joined a room do not receive live messages. Sending without an active room returns `chat:error`. The chat UI also hides history until a room is joined (messages are not yet stored per-room in the database).
+Clients that have not joined a room do not receive live messages. Sending without an active room returns `chat:error`. After join, the UI loads that room’s history from `GET /api/messages?roomId=`.
 
 Server → one client event `chat:error`:
 

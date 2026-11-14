@@ -1,21 +1,42 @@
 "use client";
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
+import { ALLOWED_IMAGE_CONTENT_TYPES } from "../constants/chat.constants";
 
 interface MessageComposerProps {
   onSend: (text: string) => void | Promise<void>;
+  onSendImage?: (file: File) => void | Promise<void>;
   disabled?: boolean;
+  uploading?: boolean;
+  placeholder?: string;
 }
 
 export function MessageComposer({
   onSend,
+  onSendImage,
   disabled = false,
+  uploading = false,
+  placeholder = "Type a message...",
 }: MessageComposerProps) {
   const [text, setText] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (disabled) {
+      setText("");
+    }
+  }, [disabled]);
 
   function submit() {
     const next = text.trim();
-    if (!next || disabled) {
+    if (!next || disabled || uploading) {
       return;
     }
     void onSend(next);
@@ -28,49 +49,101 @@ export function MessageComposer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (disabled || uploading) {
+      event.preventDefault();
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
     }
   }
 
+  function openFilePicker() {
+    if (disabled || uploading || !onSendImage) {
+      return;
+    }
+    fileInputRef.current?.click();
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file || !onSendImage || disabled || uploading) {
+      return;
+    }
+
+    void onSendImage(file);
+  }
+
+  const controlsDisabled = disabled || uploading;
+
   return (
     <form
       onSubmit={handleSubmit}
-      className="shrink-0 border-t border-slate-100 bg-white/95 px-3 py-3 backdrop-blur"
+      aria-disabled={controlsDisabled}
+      className={`shrink-0 border-t border-slate-100 bg-white/95 px-3 py-3 backdrop-blur ${
+        controlsDisabled ? "opacity-70" : ""
+      }`}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ALLOWED_IMAGE_CONTENT_TYPES.join(",")}
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       <div className="mx-auto flex w-full max-w-2xl items-end gap-2">
         <button
           type="button"
-          className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#6D5BFF] hover:bg-[#f7f5ff]"
-          aria-label="Add attachment"
+          disabled={controlsDisabled || !onSendImage}
+          onClick={openFilePicker}
+          className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#6D5BFF] hover:bg-[#f7f5ff] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+          aria-label="Upload image"
         >
           <PlusIcon />
         </button>
 
-        <div className="flex min-w-0 flex-1 items-end rounded-[22px] border border-slate-200 bg-[#f8f7fc] px-3 py-2">
+        <div
+          className={`flex min-w-0 flex-1 items-end rounded-[22px] border px-3 py-2 ${
+            controlsDisabled
+              ? "border-slate-200 bg-slate-100"
+              : "border-slate-200 bg-[#f8f7fc]"
+          }`}
+        >
           <textarea
             rows={1}
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              if (controlsDisabled) {
+                return;
+              }
+              setText(event.target.value);
+            }}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            disabled={disabled}
+            placeholder={uploading ? "Uploading image..." : placeholder}
+            disabled={controlsDisabled}
+            readOnly={controlsDisabled}
+            aria-label={placeholder}
             className="max-h-28 min-h-[28px] w-full resize-none bg-transparent text-[15px] text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="button"
-            className="mb-0.5 ml-2 shrink-0 text-slate-400"
+            disabled={controlsDisabled}
+            className="mb-0.5 ml-2 shrink-0 text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Emoji"
           >
             <EmojiIcon />
           </button>
         </div>
 
-        {text.trim() ? (
+        {text.trim() && !controlsDisabled ? (
           <button
             type="submit"
-            disabled={disabled}
+            disabled={controlsDisabled}
             className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-white shadow-[0_10px_24px_rgba(109,91,255,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
             aria-label="Send message"
           >
@@ -79,11 +152,11 @@ export function MessageComposer({
         ) : (
           <button
             type="button"
-            disabled={disabled}
+            disabled={controlsDisabled}
             className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-white shadow-[0_10px_24px_rgba(109,91,255,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
-            aria-label="Voice message"
+            aria-label={uploading ? "Uploading image" : "Voice message"}
           >
-            <MicIcon />
+            {uploading ? <SpinnerIcon /> : <MicIcon />}
           </button>
         )}
       </div>
@@ -150,6 +223,34 @@ function SendIcon() {
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className="animate-spin"
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="8"
+        stroke="currentColor"
+        strokeOpacity="0.25"
+        strokeWidth="2"
+      />
+      <path
+        d="M20 12a8 8 0 0 0-8-8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
       />
     </svg>
   );

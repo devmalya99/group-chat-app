@@ -7,12 +7,20 @@ import {
   clearAuthSession,
   getAuthSession,
 } from "@/features/auth/utils/session";
-import { lookupUserByEmail } from "../api/client";
+import {
+  fetchMessages,
+  lookupUserByEmail,
+  uploadChatMedia,
+} from "../api/client";
 import type {
   ChatMessage,
   LookupUser,
   StoredMessage,
 } from "../types/chat.types";
+import {
+  ALLOWED_IMAGE_CONTENT_TYPES,
+  MEDIA_MAX_BYTES,
+} from "../constants/chat.constants";
 import { buildRoomId } from "../utils/buildRoomId";
 import { mapStoredMessage } from "../utils/mapStoredMessage";
 import { lookupEmailSchema } from "../utils/validation";
@@ -22,12 +30,14 @@ interface UseChatMessagesResult {
   messages: ChatMessage[];
   loading: boolean;
   sending: boolean;
+  uploading: boolean;
   joining: boolean;
   connected: boolean;
   activeRoomId: string | null;
   joinedPeer: LookupUser | null;
   error: string;
   sendMessage: (text: string) => Promise<void>;
+  sendImage: (file: File) => Promise<void>;
   joinPeerRoom: (peerEmail: string) => Promise<void>;
 }
 
@@ -42,6 +52,7 @@ export function useChatMessages(): UseChatMessagesResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [joining, setJoining] = useState(false);
   const [joinedPeer, setJoinedPeer] = useState<LookupUser | null>(null);
   const [error, setError] = useState("");
@@ -65,14 +76,16 @@ export function useChatMessages(): UseChatMessagesResult {
     setToken(session.token);
     setCurrentUserId(session.user.id);
     setCurrentUserEmail(session.user.email);
-    // Do not load global message history until a personal room is joined.
     setMessages([]);
     setLoading(false);
   }, []);
 
   const onSocketMessageRef = useRef((stored: StoredMessage) => {
-    // Ignore live traffic until this client has joined a room.
     if (!activeRoomIdRef.current) {
+      return;
+    }
+
+    if (stored.roomId && stored.roomId !== activeRoomIdRef.current) {
       return;
     }
 
@@ -89,10 +102,12 @@ export function useChatMessages(): UseChatMessagesResult {
       return [...current, mapStoredMessage(stored, userId)];
     });
     setSending(false);
+    setUploading(false);
   });
 
   const onSocketErrorRef = useRef((message: string) => {
     setSending(false);
+    setUploading(false);
     setJoining(false);
     setError((current) => (current === message ? current : message));
   });
@@ -107,6 +122,50 @@ export function useChatMessages(): UseChatMessagesResult {
   useEffect(() => {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
+
+  useEffect(() => {
+    if (!token || !activeRoomId || !currentUserId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadRoomHistory() {
+      try {
+        const history = await fetchMessages(token!, activeRoomId!);
+        if (cancelled) {
+          return;
+        }
+
+        setMessages(
+          history.map((message) => mapStoredMessage(message, currentUserId!)),
+        );
+      } catch (historyError) {
+        if (cancelled) {
+          return;
+        }
+
+        const message =
+          historyError instanceof Error
+            ? historyError.message
+            : "Could not load room messages";
+
+        if (message === "Unauthorized") {
+          clearAuthSession();
+          routerRef.current.replace(AUTH_ROUTES.login);
+          return;
+        }
+
+        setError(message);
+      }
+    }
+
+    void loadRoomHistory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, activeRoomId, currentUserId]);
 
   async function joinPeerRoom(peerEmail: string) {
     const session = getAuthSession();
@@ -142,9 +201,15 @@ export function useChatMessages(): UseChatMessagesResult {
 
     try {
       const peer = await lookupUserByEmail(session.token, normalizedPeer);
-      const roomId = buildRoomId(myEmail, peer.email);
+      const peerEmailNormalized = peer.email.trim().toLowerCase();
 
-      // Switching rooms starts a fresh local transcript (no global history leak).
+      if (peer.id === session.user.id || peerEmailNormalized === myEmail) {
+        setError("You cannot start a personal chat with yourself");
+        return;
+      }
+
+      const roomId = buildRoomId(myEmail, peerEmailNormalized);
+
       setMessages([]);
       setJoinedPeer(null);
 
@@ -193,7 +258,7 @@ export function useChatMessages(): UseChatMessagesResult {
     setError("");
     setSending(true);
 
-    const sent = sendChatMessage(text);
+    const sent = sendChatMessage({ text });
 
     if (!sent) {
       setSending(false);
@@ -203,16 +268,84 @@ export function useChatMessages(): UseChatMessagesResult {
     }
   }
 
+  async function sendImage(file: File) {
+    const session = getAuthSession();
+
+    if (!session) {
+      routerRef.current.replace(AUTH_ROUTES.login);
+      return;
+    }
+
+    if (!activeRoomId) {
+      setError("Join a room before sending images");
+      return;
+    }
+
+    if (
+      !ALLOWED_IMAGE_CONTENT_TYPES.includes(
+        file.type as (typeof ALLOWED_IMAGE_CONTENT_TYPES)[number],
+      )
+    ) {
+      setError("Only JPEG, PNG, WebP, and GIF images are allowed");
+      return;
+    }
+
+    if (file.size > MEDIA_MAX_BYTES) {
+      setError("Image must be 5 MB or smaller");
+      return;
+    }
+
+    setError("");
+    setUploading(true);
+
+    try {
+      const uploaded = await uploadChatMedia(session.token, {
+        roomId: activeRoomId,
+        file,
+      });
+
+      const sent = sendChatMessage({
+        text: "",
+        mediaKey: uploaded.key,
+        mediaContentType: uploaded.contentType,
+        mediaUrl: uploaded.url,
+      });
+
+      if (!sent) {
+        setUploading(false);
+        setError(
+          "Live connection is not ready. Run the app with npm run dev:server (Socket.IO).",
+        );
+      }
+    } catch (uploadError) {
+      setUploading(false);
+      const message =
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Could not upload image";
+
+      if (message === "Unauthorized") {
+        clearAuthSession();
+        routerRef.current.replace(AUTH_ROUTES.login);
+        return;
+      }
+
+      setError(message);
+    }
+  }
+
   return {
     messages,
     loading,
     sending,
+    uploading,
     joining,
     connected,
     activeRoomId,
     joinedPeer,
     error,
     sendMessage,
+    sendImage,
     joinPeerRoom,
   };
 }

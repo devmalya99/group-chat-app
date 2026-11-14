@@ -23,7 +23,11 @@ export const users = pgTable(
 
 export const messages = pgTable("messages", {
   id: uuid("id").defaultRandom().primaryKey(),
-  text: text("text").notNull(),
+  roomId: text("room_id").notNull().default(""),
+  type: text("type").notNull().default("text"),
+  text: text("text").notNull().default(""),
+  mediaKey: text("media_key"),
+  mediaContentType: text("media_content_type"),
   senderId: uuid("sender_id")
     .notNull()
     .references(() => users.id),

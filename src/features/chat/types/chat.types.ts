@@ -1,9 +1,16 @@
+import type { MessageType } from "../constants/chat.constants";
+
 export type MessageSide = "incoming" | "outgoing";
 
 export interface ChatMessage {
   id: string;
   side: MessageSide;
+  type: MessageType;
   text: string;
+  roomId: string;
+  mediaKey?: string | null;
+  mediaContentType?: string | null;
+  mediaUrl?: string | null;
   sentAt: string;
   senderId: string;
   status?: "sent" | "delivered" | "read";
@@ -18,7 +25,13 @@ export interface ChatContact {
 
 export interface StoredMessage {
   id: string;
+  roomId: string;
+  type: MessageType;
   text: string;
+  mediaKey?: string | null;
+  mediaContentType?: string | null;
+  /** Short-lived signed URL; only set when issued for an authorized room member. */
+  mediaUrl?: string | null;
   senderId: string;
   createdAt: string;
 }
@@ -29,6 +42,7 @@ export interface MessagesListResponse {
 
 export interface CreateMessagePayload {
   text: string;
+  roomId: string;
 }
 
 export interface MessageErrorResponse {
@@ -36,7 +50,10 @@ export interface MessageErrorResponse {
 }
 
 export interface ChatSendPayload {
-  text: string;
+  text?: string;
+  mediaKey?: string;
+  mediaContentType?: string;
+  mediaUrl?: string;
 }
 
 export interface ChatMessagePayload {
@@ -63,4 +80,10 @@ export interface LookupUser {
 
 export interface LookupUserResponse {
   user: LookupUser;
+}
+
+export interface MediaUploadResponse {
+  key: string;
+  contentType: string;
+  url: string;
 }

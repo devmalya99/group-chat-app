@@ -2,6 +2,7 @@ import type {
   CreateMessagePayload,
   LookupUser,
   LookupUserResponse,
+  MediaUploadResponse,
   MessageErrorResponse,
   MessagesListResponse,
   StoredMessage,
@@ -33,11 +34,21 @@ function authHeaders(token: string): HeadersInit {
 
 export async function fetchMessages(
   token: string,
+  roomId?: string,
 ): Promise<StoredMessage[]> {
-  const response = await fetch("/api/messages", {
-    method: "GET",
-    headers: authHeaders(token),
-  });
+  const params = new URLSearchParams();
+  if (roomId) {
+    params.set("roomId", roomId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    query ? `/api/messages?${query}` : "/api/messages",
+    {
+      method: "GET",
+      headers: authHeaders(token),
+    },
+  );
 
   const data = await parseJsonResponse<MessagesListResponse>(response);
   return data.messages;
@@ -69,4 +80,23 @@ export async function lookupUserByEmail(
 
   const data = await parseJsonResponse<LookupUserResponse>(response);
   return data.user;
+}
+
+export async function uploadChatMedia(
+  token: string,
+  input: { roomId: string; file: File },
+): Promise<MediaUploadResponse> {
+  const formData = new FormData();
+  formData.set("roomId", input.roomId);
+  formData.set("file", input.file);
+
+  const response = await fetch("/api/media/upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  return parseJsonResponse<MediaUploadResponse>(response);
 }
