@@ -1,10 +1,13 @@
 import { z } from "zod";
 import {
-  ALLOWED_IMAGE_CONTENT_TYPES,
-  MEDIA_MAX_BYTES,
   MESSAGE_TEXT_MAX_LENGTH,
   MESSAGE_TYPE,
 } from "../constants/chat.constants";
+import {
+  getFileSizeLimitLabel,
+  getMaxBytesForContentType,
+  isAllowedFileContentType,
+} from "./filePolicy";
 
 export const createMessageSchema = z.object({
   text: z
@@ -24,7 +27,7 @@ export const chatSendSchema = z
       .optional(),
     mediaKey: z.string().trim().min(1).optional(),
     mediaContentType: z.string().trim().min(1).optional(),
-    mediaUrl: z.string().url().optional(),
+    originalFileName: z.string().trim().min(1).max(255).optional(),
   })
   .superRefine((value, ctx) => {
     const text = value.text?.trim() ?? "";
@@ -43,20 +46,17 @@ export const chatSendSchema = z
       if (!value.mediaContentType) {
         ctx.addIssue({
           code: "custom",
-          message: "Media content type is required",
+          message: "File content type is required",
           path: ["mediaContentType"],
         });
         return;
       }
 
-      if (
-        !ALLOWED_IMAGE_CONTENT_TYPES.includes(
-          value.mediaContentType as (typeof ALLOWED_IMAGE_CONTENT_TYPES)[number],
-        )
-      ) {
+      if (!isAllowedFileContentType(value.mediaContentType)) {
         ctx.addIssue({
           code: "custom",
-          message: "Only JPEG, PNG, WebP, and GIF images are allowed",
+          message:
+            "Unsupported file type. Allowed: images, MP4, PDF, TXT, DOC, DOCX",
           path: ["mediaContentType"],
         });
       }
@@ -70,21 +70,37 @@ export const chatSendSchema = z
       text,
       mediaKey: value.mediaKey,
       mediaContentType: value.mediaContentType,
-      mediaUrl: value.mediaUrl,
+      originalFileName: value.originalFileName,
       type: hasMedia ? MESSAGE_TYPE.media : MESSAGE_TYPE.text,
     };
   });
 
-export const mediaUploadMetaSchema = z.object({
-  contentType: z.enum(ALLOWED_IMAGE_CONTENT_TYPES, {
-    message: "Only JPEG, PNG, WebP, and GIF images are allowed",
-  }),
-  size: z
-    .number()
-    .int()
-    .positive()
-    .max(MEDIA_MAX_BYTES, "Image must be 5 MB or smaller"),
-});
+export const fileUploadMetaSchema = z
+  .object({
+    contentType: z.string().trim().min(1, "File content type is required"),
+    size: z.number().int().positive("File size must be greater than zero"),
+    originalFileName: z.string().trim().min(1).max(255).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!isAllowedFileContentType(value.contentType)) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Unsupported file type. Allowed: images, MP4, PDF, TXT, DOC, DOCX",
+        path: ["contentType"],
+      });
+      return;
+    }
+
+    const maxBytes = getMaxBytesForContentType(value.contentType);
+    if (value.size > maxBytes) {
+      ctx.addIssue({
+        code: "custom",
+        message: `File must be ${getFileSizeLimitLabel(value.contentType)} or smaller`,
+        path: ["size"],
+      });
+    }
+  });
 
 export const lookupEmailSchema = z
   .string()
@@ -94,7 +110,7 @@ export const lookupEmailSchema = z
 
 export type CreateMessageInput = z.infer<typeof createMessageSchema>;
 export type ChatSendInput = z.infer<typeof chatSendSchema>;
-export type MediaUploadMetaInput = z.infer<typeof mediaUploadMetaSchema>;
+export type FileUploadMetaInput = z.infer<typeof fileUploadMetaSchema>;
 
 export function getFirstZodError(error: z.ZodError): string {
   return error.issues[0]?.message ?? "Invalid input";

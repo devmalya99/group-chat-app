@@ -8,11 +8,11 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { ALLOWED_IMAGE_CONTENT_TYPES } from "../constants/chat.constants";
+import { acceptAttributeForFileInput } from "../utils/filePolicy";
 
 interface MessageComposerProps {
   onSend: (text: string) => void | Promise<void>;
-  onSendImage?: (file: File) => void | Promise<void>;
+  onSendFile?: (file: File) => void | Promise<void>;
   disabled?: boolean;
   uploading?: boolean;
   placeholder?: string;
@@ -20,13 +20,14 @@ interface MessageComposerProps {
 
 export function MessageComposer({
   onSend,
-  onSendImage,
+  onSendFile,
   disabled = false,
   uploading = false,
   placeholder = "Type a message...",
 }: MessageComposerProps) {
   const [text, setText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const handleFile = onSendFile;
 
   useEffect(() => {
     if (disabled) {
@@ -61,7 +62,7 @@ export function MessageComposer({
   }
 
   function openFilePicker() {
-    if (disabled || uploading || !onSendImage) {
+    if (disabled || uploading || !handleFile) {
       return;
     }
     fileInputRef.current?.click();
@@ -71,11 +72,11 @@ export function MessageComposer({
     const file = event.target.files?.[0];
     event.target.value = "";
 
-    if (!file || !onSendImage || disabled || uploading) {
+    if (!file || !handleFile || disabled || uploading) {
       return;
     }
 
-    void onSendImage(file);
+    void handleFile(file);
   }
 
   const controlsDisabled = disabled || uploading;
@@ -91,7 +92,7 @@ export function MessageComposer({
       <input
         ref={fileInputRef}
         type="file"
-        accept={ALLOWED_IMAGE_CONTENT_TYPES.join(",")}
+        accept={acceptAttributeForFileInput()}
         className="hidden"
         onChange={handleFileChange}
       />
@@ -99,10 +100,10 @@ export function MessageComposer({
       <div className="mx-auto flex w-full max-w-2xl items-end gap-2">
         <button
           type="button"
-          disabled={controlsDisabled || !onSendImage}
+          disabled={controlsDisabled || !handleFile}
           onClick={openFilePicker}
           className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#6D5BFF] hover:bg-[#f7f5ff] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-          aria-label="Upload image"
+          aria-label="Upload file"
         >
           <PlusIcon />
         </button>
@@ -124,7 +125,7 @@ export function MessageComposer({
               setText(event.target.value);
             }}
             onKeyDown={handleKeyDown}
-            placeholder={uploading ? "Uploading image..." : placeholder}
+            placeholder={uploading ? "Uploading file..." : placeholder}
             disabled={controlsDisabled}
             readOnly={controlsDisabled}
             aria-label={placeholder}
@@ -154,7 +155,7 @@ export function MessageComposer({
             type="button"
             disabled={controlsDisabled}
             className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-white shadow-[0_10px_24px_rgba(109,91,255,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
-            aria-label={uploading ? "Uploading image" : "Voice message"}
+            aria-label={uploading ? "Uploading file" : "Voice message"}
           >
             {uploading ? <SpinnerIcon /> : <MicIcon />}
           </button>

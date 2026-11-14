@@ -28,6 +28,7 @@ export const messages = pgTable("messages", {
   text: text("text").notNull().default(""),
   mediaKey: text("media_key"),
   mediaContentType: text("media_content_type"),
+  originalFileName: text("original_file_name"),
   senderId: uuid("sender_id")
     .notNull()
     .references(() => users.id),

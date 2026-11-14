@@ -9,12 +9,13 @@ Next.js + TypeScript group chat with Signup/Login UI, Neon Postgres auth, persis
 - `POST /api/auth/login` — email or phone + password → JWT
 - `GET /api/messages?roomId=` — room-scoped history (JWT + room membership required)
 - `POST /api/messages` — save a text message for a room (JWT required)
-- `POST /api/media/upload` — upload an image to Neon Object Storage (JWT + room membership)
-- `GET /api/media/access?roomId=&key=` — room-gated signed URL for private media
+- `POST /api/media/upload` — upload a file to Neon Object Storage (JWT + room membership)
+- `GET /api/media/access?roomId=&key=` — room-gated signed URL for private files
+- `DELETE /api/media/delete?roomId=&messageId=` — uploader-only hard delete (DB + Neon object)
 - `GET /api/users/by-email?email=` — verify a peer email exists before joining a room (JWT required)
 - Socket.IO live chat on the same port via custom `server.js` (`server/socket-io/`)
 - Personal rooms: enter a peer email → lookup → deterministic room ID → `join_room`
-- Image sharing via composer **+** button → Neon `uploads` bucket → Socket.IO fan-out
+- File sharing via composer **+** (images, MP4, PDF, TXT, DOC, DOCX) → Neon `uploads` → Socket.IO
 - Neon Lakebase Postgres persistence via Drizzle ORM
 
 ## Stack
@@ -137,11 +138,19 @@ Caller must be a participant in `roomId`. Media rows include a short-lived signe
 
 The chat UI sends over Socket.IO for live fan-out. HTTP POST remains available.
 
-## Media API
+## File sharing API
 
-Private Neon Object Storage bucket: `uploads` (max **5 MB**, JPEG/PNG/WebP/GIF).
+Private Neon Object Storage bucket: `uploads`.
 
-### Upload image
+| Category | Types | Max size |
+|---|---|---|
+| Images | JPEG, PNG, WebP, GIF | 5 MB |
+| Video | MP4 | 10 MB |
+| Documents | PDF, TXT, DOC, DOCX | 5 MB |
+
+One file per send. Only room members can upload/access. Only the uploader can delete.
+
+### Upload file
 
 `POST /api/media/upload` — `multipart/form-data`
 
@@ -151,17 +160,26 @@ Requires JWT + room membership. Response:
 
 ```json
 {
-  "key": "rooms/alice%40email.com%3Abob%40email.com/<uuid>.jpg",
-  "contentType": "image/jpeg",
-  "url": "<signed-get-url>"
+  "key": "rooms/alice%40email.com%3Abob%40email.com/<uuid>.pdf",
+  "contentType": "application/pdf",
+  "url": "<signed-get-url>",
+  "originalFileName": "notes.pdf",
+  "fileCategory": "document",
+  "fileSize": 204800
 }
 ```
 
-### Access image (re-sign)
+### Access file (re-sign)
 
 `GET /api/media/access?roomId=...&key=...`
 
 Returns `{ "url": "<signed-get-url>" }` only if the caller belongs to that room and the key is under that room’s prefix.
+
+### Delete file (uploader only)
+
+`DELETE /api/media/delete?roomId=...&messageId=...`
+
+Hard-deletes the Neon object and the message row.
 
 ## User lookup API
 
@@ -251,16 +269,20 @@ Client → server event `chat:send` (text):
 { "text": "Hello team" }
 ```
 
-Client → server event `chat:send` (image, after HTTP upload):
+Client → server event `chat:send` (file, after HTTP upload — metadata only, no signed URL):
 
 ```json
 {
   "text": "",
-  "mediaKey": "rooms/.../uuid.jpg",
-  "mediaContentType": "image/jpeg",
-  "mediaUrl": "<signed-get-url>"
+  "mediaKey": "rooms/.../uuid.pdf",
+  "mediaContentType": "application/pdf",
+  "originalFileName": "notes.pdf"
 }
 ```
+
+Clients then call `GET /api/media/access` for a short-lived download/preview URL.
+
+After an uploader deletes a file via HTTP, they emit `chat:file-deleted` `{ "messageId": "..." }` so room peers remove the bubble live.
 
 Server → **only sockets in the sender’s active room** event `chat:message`:
 
@@ -293,6 +315,16 @@ Server → one client event `chat:error`:
 4. Confirm the status shows room joined and the header shows User B’s name.
 5. Enter a fake email → expect “No user found with that email” and no join.
 6. On User B, enter User A’s email → both should land in the same `roomId`.
+
+### Manual check (file sharing)
+
+1. Restart with `npm run dev:server` after Socket.IO handler changes.
+2. Join the same room as User A and User B.
+3. User A taps **+** and sends an image (≤ 5 MB) → both see an image preview.
+4. User A sends a PDF or MP4 (within size limits) → both see a download card; Download works.
+5. User B cannot see a **Delete** control on A’s files; User A can delete their own file.
+6. After delete, the bubble disappears for A; refresh B’s room history to confirm it’s gone.
+7. A third account that is not in the room cannot list or access those files.
 
 ## Scripts
 

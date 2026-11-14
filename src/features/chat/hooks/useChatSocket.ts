@@ -6,6 +6,7 @@ import { getAuthSession } from "@/features/auth/utils/session";
 import { SOCKET_EVENT, SOCKET_PATH } from "../constants/chat.constants";
 import type {
   ChatErrorPayload,
+  ChatFileDeletedPayload,
   ChatMessagePayload,
   ChatSendPayload,
   JoinRoomPayload,
@@ -18,6 +19,7 @@ interface UseChatSocketOptions {
   token: string | null;
   enabled: boolean;
   onMessage: (message: StoredMessage) => void;
+  onFileDeleted?: (payload: ChatFileDeletedPayload) => void;
   onError?: (message: string) => void;
 }
 
@@ -25,6 +27,7 @@ interface UseChatSocketResult {
   connected: boolean;
   activeRoomId: string | null;
   sendChatMessage: (payload: ChatSendPayload) => boolean;
+  notifyFileDeleted: (messageId: string) => boolean;
   joinRoom: (roomId: string) => boolean;
 }
 
@@ -32,17 +35,23 @@ export function useChatSocket({
   token,
   enabled,
   onMessage,
+  onFileDeleted,
   onError,
 }: UseChatSocketOptions): UseChatSocketResult {
   const [connected, setConnected] = useState(false);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const onMessageRef = useRef(onMessage);
+  const onFileDeletedRef = useRef(onFileDeleted);
   const onErrorRef = useRef(onError);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
   }, [onMessage]);
+
+  useEffect(() => {
+    onFileDeletedRef.current = onFileDeleted;
+  }, [onFileDeleted]);
 
   useEffect(() => {
     onErrorRef.current = onError;
@@ -97,6 +106,16 @@ export function useChatSocket({
       onMessageRef.current(payload.message);
     });
 
+    socket.on(
+      SOCKET_EVENT.chatFileDeleted,
+      (payload: ChatFileDeletedPayload) => {
+        if (!payload?.messageId) {
+          return;
+        }
+        onFileDeletedRef.current?.(payload);
+      },
+    );
+
     socket.on(SOCKET_EVENT.roomJoined, (payload: RoomJoinedPayload) => {
       if (!payload?.roomId) {
         return;
@@ -128,6 +147,18 @@ export function useChatSocket({
     return true;
   }
 
+  function notifyFileDeleted(messageId: string): boolean {
+    const socket = socketRef.current;
+    const trimmed = messageId.trim();
+
+    if (!socket || !socket.connected || !activeRoomId || !trimmed) {
+      return false;
+    }
+
+    socket.emit(SOCKET_EVENT.chatFileDeleted, { messageId: trimmed });
+    return true;
+  }
+
   function joinRoom(roomId: string): boolean {
     const socket = socketRef.current;
     const trimmed = roomId.trim();
@@ -145,6 +176,7 @@ export function useChatSocket({
     connected,
     activeRoomId,
     sendChatMessage,
+    notifyFileDeleted,
     joinRoom,
   };
 }

@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { getAuthUserFromRequest } from "@/features/auth/utils/request-auth";
-import {
-  ALLOWED_IMAGE_CONTENT_TYPES,
-  MEDIA_MAX_BYTES,
-} from "@/features/chat/constants/chat.constants";
 import { isRoomMember } from "@/features/chat/utils/isRoomMember";
 import {
+  fileUploadMetaSchema,
   getFirstZodError,
-  mediaUploadMetaSchema,
 } from "@/features/chat/utils/validation";
 import { logger } from "@/services/logging/logger";
-import { uploadChatImage } from "@/services/storage/uploads";
+import { uploadChatFile } from "@/services/storage/uploads";
 
 export async function POST(request: Request) {
   try {
@@ -36,33 +32,22 @@ export async function POST(request: Request) {
 
     if (!isRoomMember(roomId, user.email)) {
       return NextResponse.json(
-        { message: "You can only upload media to rooms you belong to" },
+        { message: "You can only upload files to rooms you belong to" },
         { status: 403 },
       );
     }
 
     if (!(fileValue instanceof File)) {
       return NextResponse.json(
-        { message: "Image file is required" },
+        { message: "File is required" },
         { status: 400 },
       );
     }
 
-    const contentType = fileValue.type;
-    if (
-      !ALLOWED_IMAGE_CONTENT_TYPES.includes(
-        contentType as (typeof ALLOWED_IMAGE_CONTENT_TYPES)[number],
-      )
-    ) {
-      return NextResponse.json(
-        { message: "Only JPEG, PNG, WebP, and GIF images are allowed" },
-        { status: 400 },
-      );
-    }
-
-    const meta = mediaUploadMetaSchema.safeParse({
-      contentType,
+    const meta = fileUploadMetaSchema.safeParse({
+      contentType: fileValue.type,
       size: fileValue.size,
+      originalFileName: fileValue.name,
     });
 
     if (!meta.success) {
@@ -72,18 +57,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (fileValue.size > MEDIA_MAX_BYTES) {
-      return NextResponse.json(
-        { message: "Image must be 5 MB or smaller" },
-        { status: 400 },
-      );
-    }
-
     const bytes = new Uint8Array(await fileValue.arrayBuffer());
-    const uploaded = await uploadChatImage({
+    const uploaded = await uploadChatFile({
       roomId,
       contentType: meta.data.contentType,
+      originalFileName: meta.data.originalFileName ?? fileValue.name,
       body: bytes,
+      fileSize: meta.data.size,
     });
 
     return NextResponse.json(
@@ -91,16 +71,19 @@ export async function POST(request: Request) {
         key: uploaded.key,
         contentType: uploaded.contentType,
         url: uploaded.url,
+        originalFileName: uploaded.originalFileName,
+        fileCategory: uploaded.fileCategory,
+        fileSize: uploaded.fileSize,
       },
       { status: 201 },
     );
   } catch (error) {
-    logger.error("Media upload failed", {
+    logger.error("File upload failed", {
       error: error instanceof Error ? error.message : "unknown",
     });
 
     return NextResponse.json(
-      { message: "Could not upload image. Please try again." },
+      { message: "Could not upload file. Please try again." },
       { status: 500 },
     );
   }

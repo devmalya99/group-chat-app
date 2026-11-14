@@ -61,8 +61,10 @@ export function RoomJoinForm({
 
       {joinedPeer && activeRoomId ? (
         <p className="mt-2 truncate text-xs text-slate-600">
-          Joined room with{" "}
-          <span className="font-medium text-slate-800">{joinedPeer.email}</span>
+          Active chat:{" "}
+          <span className="font-medium text-slate-800">{joinedPeer.name}</span>
+          {" · "}
+          <span className="text-slate-500">{joinedPeer.email}</span>
         </p>
       ) : (
         <p className="mt-2 text-xs text-slate-500">

@@ -1,4 +1,7 @@
-import type { MessageType } from "../constants/chat.constants";
+import type {
+  FileCategory,
+  MessageType,
+} from "../constants/chat.constants";
 
 export type MessageSide = "incoming" | "outgoing";
 
@@ -11,6 +14,9 @@ export interface ChatMessage {
   mediaKey?: string | null;
   mediaContentType?: string | null;
   mediaUrl?: string | null;
+  originalFileName?: string | null;
+  fileCategory?: FileCategory | null;
+  fileSize?: number | null;
   sentAt: string;
   senderId: string;
   status?: "sent" | "delivered" | "read";
@@ -30,8 +36,11 @@ export interface StoredMessage {
   text: string;
   mediaKey?: string | null;
   mediaContentType?: string | null;
-  /** Short-lived signed URL; only set when issued for an authorized room member. */
+  /** Short-lived signed URL; issued only for authorized room members. */
   mediaUrl?: string | null;
+  originalFileName?: string | null;
+  fileCategory?: FileCategory | null;
+  fileSize?: number | null;
   senderId: string;
   createdAt: string;
 }
@@ -53,11 +62,16 @@ export interface ChatSendPayload {
   text?: string;
   mediaKey?: string;
   mediaContentType?: string;
-  mediaUrl?: string;
+  originalFileName?: string;
 }
 
 export interface ChatMessagePayload {
   message: StoredMessage;
+}
+
+export interface ChatFileDeletedPayload {
+  roomId: string;
+  messageId: string;
 }
 
 export interface ChatErrorPayload {
@@ -82,8 +96,11 @@ export interface LookupUserResponse {
   user: LookupUser;
 }
 
-export interface MediaUploadResponse {
+export interface FileUploadResponse {
   key: string;
   contentType: string;
   url: string;
+  originalFileName: string;
+  fileCategory: FileCategory;
+  fileSize: number;
 }

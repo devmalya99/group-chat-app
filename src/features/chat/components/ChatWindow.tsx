@@ -17,10 +17,13 @@ export function ChatWindow() {
     joining,
     connected,
     activeRoomId,
+    currentUserId,
+    currentUser,
     joinedPeer,
     error,
     sendMessage,
-    sendImage,
+    sendFile,
+    deleteFile,
     joinPeerRoom,
   } = useChatMessages();
 
@@ -44,7 +47,7 @@ export function ChatWindow() {
   return (
     <main className="flex min-h-full flex-1 justify-center bg-[linear-gradient(180deg,#f4f1ff_0%,#ffffff_40%,#f3fff8_100%)] p-0 sm:p-6">
       <section className="flex h-[100dvh] w-full max-w-md flex-col overflow-hidden bg-[#f7f5ff] shadow-[0_24px_60px_rgba(88,70,180,0.12)] sm:h-[min(820px,calc(100dvh-3rem))] sm:rounded-[28px] sm:border sm:border-white">
-        <ChatHeader contact={contact} />
+        <ChatHeader me={currentUser} peer={joinedPeer} contact={contact} />
 
         <RoomJoinForm
           joinedPeer={joinedPeer}
@@ -85,7 +88,11 @@ export function ChatWindow() {
             </p>
           </div>
         ) : (
-          <MessageList messages={messages} />
+          <MessageList
+            messages={messages}
+            currentUserId={currentUserId}
+            onDeleteFile={deleteFile}
+          />
         )}
 
         {error ? (
@@ -96,7 +103,7 @@ export function ChatWindow() {
 
         <MessageComposer
           onSend={sendMessage}
-          onSendImage={sendImage}
+          onSendFile={sendFile}
           disabled={!canSend}
           uploading={uploading}
           placeholder={composerPlaceholder}

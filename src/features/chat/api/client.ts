@@ -1,8 +1,8 @@
 import type {
   CreateMessagePayload,
+  FileUploadResponse,
   LookupUser,
   LookupUserResponse,
-  MediaUploadResponse,
   MessageErrorResponse,
   MessagesListResponse,
   StoredMessage,
@@ -82,10 +82,10 @@ export async function lookupUserByEmail(
   return data.user;
 }
 
-export async function uploadChatMedia(
+export async function uploadChatFile(
   token: string,
   input: { roomId: string; file: File },
-): Promise<MediaUploadResponse> {
+): Promise<FileUploadResponse> {
   const formData = new FormData();
   formData.set("roomId", input.roomId);
   formData.set("file", input.file);
@@ -98,5 +98,40 @@ export async function uploadChatMedia(
     body: formData,
   });
 
-  return parseJsonResponse<MediaUploadResponse>(response);
+  return parseJsonResponse<FileUploadResponse>(response);
+}
+
+export async function fetchFileAccessUrl(
+  token: string,
+  input: { roomId: string; key: string },
+): Promise<string> {
+  const params = new URLSearchParams({
+    roomId: input.roomId,
+    key: input.key,
+  });
+
+  const response = await fetch(`/api/media/access?${params.toString()}`, {
+    method: "GET",
+    headers: authHeaders(token),
+  });
+
+  const data = await parseJsonResponse<{ url: string }>(response);
+  return data.url;
+}
+
+export async function deleteChatFileMessage(
+  token: string,
+  input: { roomId: string; messageId: string },
+): Promise<void> {
+  const params = new URLSearchParams({
+    roomId: input.roomId,
+    messageId: input.messageId,
+  });
+
+  const response = await fetch(`/api/media/delete?${params.toString()}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+
+  await parseJsonResponse<{ ok: boolean }>(response);
 }

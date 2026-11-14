@@ -10,9 +10,15 @@ import { MessageBubble } from "./MessageBubble";
 
 interface MessageListProps {
   messages: ChatMessage[];
+  currentUserId?: string | null;
+  onDeleteFile?: (messageId: string) => void | Promise<void>;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({
+  messages,
+  currentUserId,
+  onDeleteFile,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [nowMs, setNowMs] = useState<number | null>(null);
 
@@ -41,7 +47,11 @@ export function MessageList({ messages }: MessageListProps) {
                   </span>
                 </div>
               ) : null}
-              <MessageBubble message={message} />
+              <MessageBubble
+                message={message}
+                currentUserId={currentUserId}
+                onDeleteFile={onDeleteFile}
+              />
             </div>
           );
         })}

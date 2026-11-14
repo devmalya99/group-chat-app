@@ -1,84 +1,64 @@
-import type { ChatContact } from "../types/chat.types";
+import type { ChatContact, LookupUser } from "../types/chat.types";
+
+interface ChatSelfUser {
+  id: string;
+  name: string;
+  email: string;
+}
 
 interface ChatHeaderProps {
+  me: ChatSelfUser | null;
+  peer: LookupUser | null;
   contact: ChatContact;
 }
 
-export function ChatHeader({ contact }: ChatHeaderProps) {
-  const initial = contact.name.slice(0, 1).toUpperCase();
+export function ChatHeader({ me, peer, contact }: ChatHeaderProps) {
+  const peerInitial = (peer?.name || contact.name).slice(0, 1).toUpperCase();
+  const meInitial = (me?.name || "Y").slice(0, 1).toUpperCase();
+  const peerSubtitle =
+    peer?.email ||
+    (contact.isOnline ? "Online" : "Join a room to start chatting");
 
   return (
-    <header className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="relative shrink-0">
-          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-sm font-bold text-white">
-            {initial}
+    <header className="shrink-0 border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="relative shrink-0">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#6D5BFF] to-[#4F7CFF] text-sm font-bold text-white">
+              {peerInitial}
+            </div>
+            {contact.isOnline ? (
+              <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-[#4ADE80]" />
+            ) : null}
           </div>
-          {contact.isOnline ? (
-            <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-[#4ADE80]" />
-          ) : null}
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Chatting with
+            </p>
+            <h1 className="truncate text-base font-semibold text-slate-900">
+              {peer?.name || contact.name}
+            </h1>
+            <p className="truncate text-xs text-slate-500">{peerSubtitle}</p>
+          </div>
         </div>
-        <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold text-slate-900">
-            {contact.name}
-          </h1>
-          <p className="text-xs font-medium text-[#22c55e]">
-            {contact.isOnline ? "Online" : "Offline"}
-          </p>
-        </div>
-      </div>
 
-      <div className="flex items-center gap-2 text-slate-500">
-        <button
-          type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-slate-50"
-          aria-label="Voice call"
-        >
-          <PhoneIcon />
-        </button>
-        <button
-          type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-slate-50"
-          aria-label="Video call"
-        >
-          <VideoIcon />
-        </button>
+        {me ? (
+          <div className="flex max-w-[42%] shrink-0 items-center gap-2 rounded-2xl bg-[#f4f1ff] px-2.5 py-2">
+            <div className="min-w-0 text-right">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6D5BFF]">
+                You
+              </p>
+              <p className="truncate text-xs font-semibold text-slate-800">
+                {me.name}
+              </p>
+              <p className="truncate text-[11px] text-slate-500">{me.email}</p>
+            </div>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-[#6D5BFF] shadow-sm">
+              {meInitial}
+            </div>
+          </div>
+        ) : null}
       </div>
     </header>
-  );
-}
-
-function PhoneIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M7.5 3.75h2.1l1.2 4.2-1.65 1.05a12.3 12.3 0 0 0 5.85 5.85l1.05-1.65 4.2 1.2v2.1A1.5 1.5 0 0 1 18.75 18 14.25 14.25 0 0 1 4.5 3.75a1.5 1.5 0 0 1 1.5-1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function VideoIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect
-        x="3.5"
-        y="6.5"
-        width="12"
-        height="11"
-        rx="2.5"
-        stroke="currentColor"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M15.5 10.5 20 8v8l-4.5-2.5"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

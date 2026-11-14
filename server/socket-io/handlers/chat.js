@@ -1,16 +1,18 @@
 const { neon } = require("@neondatabase/serverless");
+const {
+  ALLOWED_FILE_CONTENT_TYPES,
+  getFileCategory,
+  isMediaKeyForRoom,
+  isRoomMember,
+  sanitizeOriginalFileName,
+} = require("../../../src/shared/file-policy");
 
 const MESSAGE_TEXT_MAX_LENGTH = 2000;
-const ALLOWED_IMAGE_CONTENT_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-];
 
 const SOCKET_EVENT = {
   chatSend: "chat:send",
   chatMessage: "chat:message",
+  chatFileDeleted: "chat:file-deleted",
   chatError: "chat:error",
   joinRoom: "join_room",
   roomJoined: "room:joined",
@@ -24,26 +26,6 @@ function getSql() {
   return neon(databaseUrl);
 }
 
-function isRoomMember(roomId, userEmail) {
-  const normalizedEmail =
-    typeof userEmail === "string" ? userEmail.trim().toLowerCase() : "";
-  if (!normalizedEmail || !roomId) {
-    return false;
-  }
-
-  const participants = roomId
-    .split(":")
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
-
-  return participants.includes(normalizedEmail);
-}
-
-function isMediaKeyForRoom(key, roomId) {
-  const expectedPrefix = `rooms/${encodeURIComponent(roomId.trim().toLowerCase())}/`;
-  return typeof key === "string" && key.startsWith(expectedPrefix);
-}
-
 async function createMessage({
   text,
   senderId,
@@ -51,17 +33,27 @@ async function createMessage({
   type,
   mediaKey,
   mediaContentType,
+  originalFileName,
 }) {
   const sql = getSql();
   const rows = await sql`
-    INSERT INTO messages (text, sender_id, room_id, type, media_key, media_content_type)
+    INSERT INTO messages (
+      text,
+      sender_id,
+      room_id,
+      type,
+      media_key,
+      media_content_type,
+      original_file_name
+    )
     VALUES (
       ${text},
       ${senderId},
       ${roomId},
       ${type},
       ${mediaKey},
-      ${mediaContentType}
+      ${mediaContentType},
+      ${originalFileName}
     )
     RETURNING
       id,
@@ -71,6 +63,7 @@ async function createMessage({
       type,
       media_key,
       media_content_type,
+      original_file_name,
       created_at
   `;
 
@@ -87,6 +80,10 @@ async function createMessage({
     type: row.type,
     mediaKey: row.media_key,
     mediaContentType: row.media_content_type,
+    originalFileName: row.original_file_name,
+    fileCategory: row.media_content_type
+      ? getFileCategory(row.media_content_type)
+      : null,
     createdAt: new Date(row.created_at).toISOString(),
   };
 }
@@ -166,8 +163,11 @@ function registerChatHandlers(io, socket) {
       typeof payload.mediaContentType === "string"
         ? payload.mediaContentType.trim()
         : "";
-    const mediaUrl =
-      typeof payload.mediaUrl === "string" ? payload.mediaUrl.trim() : "";
+    const originalFileName = sanitizeOriginalFileName(
+      typeof payload.originalFileName === "string"
+        ? payload.originalFileName
+        : "",
+    );
 
     const hasMedia = Boolean(mediaKey);
 
@@ -186,16 +186,17 @@ function registerChatHandlers(io, socket) {
     }
 
     if (hasMedia) {
-      if (!ALLOWED_IMAGE_CONTENT_TYPES.includes(mediaContentType)) {
+      if (!ALLOWED_FILE_CONTENT_TYPES.includes(mediaContentType)) {
         socket.emit(SOCKET_EVENT.chatError, {
-          message: "Only JPEG, PNG, WebP, and GIF images are allowed",
+          message:
+            "Unsupported file type. Allowed: images, MP4, PDF, TXT, DOC, DOCX",
         });
         return;
       }
 
       if (!isMediaKeyForRoom(mediaKey, roomId)) {
         socket.emit(SOCKET_EVENT.chatError, {
-          message: "Media does not belong to this room",
+          message: "File does not belong to this room",
         });
         return;
       }
@@ -209,13 +210,10 @@ function registerChatHandlers(io, socket) {
         type: hasMedia ? "media" : "text",
         mediaKey: hasMedia ? mediaKey : null,
         mediaContentType: hasMedia ? mediaContentType : null,
+        originalFileName: hasMedia ? originalFileName : null,
       });
 
-      if (hasMedia && mediaUrl) {
-        message.mediaUrl = mediaUrl;
-      }
-
-      // Only clients that joined this room receive the message (and signed URL).
+      // Metadata only — clients request short-lived signed URLs over HTTP.
       io.to(roomId).emit(SOCKET_EVENT.chatMessage, { message });
     } catch (error) {
       console.error("[socket.io] Failed to save message", error);
@@ -223,6 +221,28 @@ function registerChatHandlers(io, socket) {
         message: "Could not send message. Please try again.",
       });
     }
+  });
+
+  socket.on(SOCKET_EVENT.chatFileDeleted, (payload = {}) => {
+    const roomId =
+      typeof socket.data.activeRoomId === "string"
+        ? socket.data.activeRoomId
+        : "";
+    const messageId =
+      typeof payload.messageId === "string" ? payload.messageId.trim() : "";
+
+    if (!roomId || !messageId) {
+      return;
+    }
+
+    if (!isRoomMember(roomId, socket.data.user?.email)) {
+      return;
+    }
+
+    io.to(roomId).emit(SOCKET_EVENT.chatFileDeleted, {
+      roomId,
+      messageId,
+    });
   });
 }
 

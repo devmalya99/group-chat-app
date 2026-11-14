@@ -5,16 +5,13 @@ import {
   listMessages,
 } from "@/features/chat/api/messages.service";
 import { MESSAGE_TYPE } from "@/features/chat/constants/chat.constants";
-import { isRoomMember } from "@/features/chat/utils/isRoomMember";
+import { isMediaKeyForRoom, isRoomMember } from "@/features/chat/utils/filePolicy";
 import {
   createMessageSchema,
   getFirstZodError,
 } from "@/features/chat/utils/validation";
 import { logger } from "@/services/logging/logger";
-import {
-  createSignedMediaUrl,
-  isMediaKeyForRoom,
-} from "@/services/storage/uploads";
+import { createSignedMediaUrl } from "@/services/storage/uploads";
 
 export async function GET(request: Request) {
   try {

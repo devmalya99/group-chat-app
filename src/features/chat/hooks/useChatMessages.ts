@@ -7,24 +7,25 @@ import {
   clearAuthSession,
   getAuthSession,
 } from "@/features/auth/utils/session";
-import {
-  fetchMessages,
-  lookupUserByEmail,
-  uploadChatMedia,
-} from "../api/client";
+import { fetchMessages, lookupUserByEmail } from "../api/client";
+import { MESSAGE_TYPE } from "../constants/chat.constants";
 import type {
+  ChatFileDeletedPayload,
   ChatMessage,
   LookupUser,
   StoredMessage,
 } from "../types/chat.types";
-import {
-  ALLOWED_IMAGE_CONTENT_TYPES,
-  MEDIA_MAX_BYTES,
-} from "../constants/chat.constants";
 import { buildRoomId } from "../utils/buildRoomId";
 import { mapStoredMessage } from "../utils/mapStoredMessage";
 import { lookupEmailSchema } from "../utils/validation";
+import { useChatFileSharing } from "./useChatFileSharing";
 import { useChatSocket } from "./useChatSocket";
+
+interface ChatSelfUser {
+  id: string;
+  name: string;
+  email: string;
+}
 
 interface UseChatMessagesResult {
   messages: ChatMessage[];
@@ -34,10 +35,13 @@ interface UseChatMessagesResult {
   joining: boolean;
   connected: boolean;
   activeRoomId: string | null;
+  currentUserId: string | null;
+  currentUser: ChatSelfUser | null;
   joinedPeer: LookupUser | null;
   error: string;
   sendMessage: (text: string) => Promise<void>;
-  sendImage: (file: File) => Promise<void>;
+  sendFile: (file: File) => Promise<void>;
+  deleteFile: (messageId: string) => Promise<void>;
   joinPeerRoom: (peerEmail: string) => Promise<void>;
 }
 
@@ -46,8 +50,15 @@ export function useChatMessages(): UseChatMessagesResult {
   const routerRef = useRef(router);
   const currentUserIdRef = useRef<string | null>(null);
   const activeRoomIdRef = useRef<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
+  const resolveFileUrlRef = useRef<
+    | ((token: string, roomId: string, key: string) => Promise<string | null>)
+    | null
+  >(null);
+
   const [token, setToken] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<ChatSelfUser | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +77,10 @@ export function useChatMessages(): UseChatMessagesResult {
   }, [currentUserId]);
 
   useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  useEffect(() => {
     const session = getAuthSession();
 
     if (!session) {
@@ -75,34 +90,70 @@ export function useChatMessages(): UseChatMessagesResult {
 
     setToken(session.token);
     setCurrentUserId(session.user.id);
+    setCurrentUser({
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+    });
     setCurrentUserEmail(session.user.email);
     setMessages([]);
     setLoading(false);
   }, []);
 
   const onSocketMessageRef = useRef((stored: StoredMessage) => {
-    if (!activeRoomIdRef.current) {
-      return;
-    }
-
-    if (stored.roomId && stored.roomId !== activeRoomIdRef.current) {
-      return;
-    }
-
-    const userId = currentUserIdRef.current;
-    if (!userId) {
-      return;
-    }
-
-    setMessages((current) => {
-      if (current.some((message) => message.id === stored.id)) {
-        return current;
+    void (async () => {
+      if (!activeRoomIdRef.current) {
+        return;
       }
 
-      return [...current, mapStoredMessage(stored, userId)];
-    });
-    setSending(false);
-    setUploading(false);
+      if (stored.roomId && stored.roomId !== activeRoomIdRef.current) {
+        return;
+      }
+
+      const userId = currentUserIdRef.current;
+      const sessionToken = tokenRef.current;
+      if (!userId || !sessionToken) {
+        return;
+      }
+
+      let next = stored;
+      if (
+        stored.type === MESSAGE_TYPE.media &&
+        stored.mediaKey &&
+        !stored.mediaUrl
+      ) {
+        const mediaUrl = await resolveFileUrlRef.current?.(
+          sessionToken,
+          stored.roomId || activeRoomIdRef.current,
+          stored.mediaKey,
+        );
+        next = { ...stored, mediaUrl };
+      }
+
+      setMessages((current) => {
+        if (current.some((message) => message.id === next.id)) {
+          return current;
+        }
+
+        return [...current, mapStoredMessage(next, userId)];
+      });
+      setSending(false);
+      setUploading(false);
+    })();
+  });
+
+  const onFileDeletedRef = useRef((payload: ChatFileDeletedPayload) => {
+    if (
+      activeRoomIdRef.current &&
+      payload.roomId &&
+      payload.roomId !== activeRoomIdRef.current
+    ) {
+      return;
+    }
+
+    setMessages((current) =>
+      current.filter((message) => message.id !== payload.messageId),
+    );
   });
 
   const onSocketErrorRef = useRef((message: string) => {
@@ -112,16 +163,37 @@ export function useChatMessages(): UseChatMessagesResult {
     setError((current) => (current === message ? current : message));
   });
 
-  const { connected, activeRoomId, sendChatMessage, joinRoom } = useChatSocket({
+  const {
+    connected,
+    activeRoomId,
+    sendChatMessage,
+    notifyFileDeleted,
+    joinRoom,
+  } = useChatSocket({
     token,
     enabled: Boolean(token),
     onMessage: onSocketMessageRef.current,
+    onFileDeleted: onFileDeletedRef.current,
     onError: onSocketErrorRef.current,
   });
 
   useEffect(() => {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
+
+  const { sendFile, deleteFile, resolveFileUrl } = useChatFileSharing({
+    activeRoomId,
+    messages,
+    sendChatMessage,
+    notifyFileDeleted,
+    onMessagesChange: setMessages,
+    onUploadingChange: setUploading,
+    onError: setError,
+  });
+
+  useEffect(() => {
+    resolveFileUrlRef.current = resolveFileUrl;
+  }, [resolveFileUrl]);
 
   useEffect(() => {
     if (!token || !activeRoomId || !currentUserId) {
@@ -182,7 +254,9 @@ export function useChatMessages(): UseChatMessagesResult {
     }
 
     const normalizedPeer = parsed.data;
-    const myEmail = (currentUserEmail ?? session.user.email).trim().toLowerCase();
+    const myEmail = (currentUserEmail ?? session.user.email)
+      .trim()
+      .toLowerCase();
 
     if (normalizedPeer === myEmail) {
       setError("You cannot start a personal chat with yourself");
@@ -226,9 +300,7 @@ export function useChatMessages(): UseChatMessagesResult {
     } catch (joinError) {
       setJoinedPeer(null);
       const message =
-        joinError instanceof Error
-          ? joinError.message
-          : "Could not join room";
+        joinError instanceof Error ? joinError.message : "Could not join room";
 
       if (message === "Unauthorized") {
         clearAuthSession();
@@ -268,72 +340,6 @@ export function useChatMessages(): UseChatMessagesResult {
     }
   }
 
-  async function sendImage(file: File) {
-    const session = getAuthSession();
-
-    if (!session) {
-      routerRef.current.replace(AUTH_ROUTES.login);
-      return;
-    }
-
-    if (!activeRoomId) {
-      setError("Join a room before sending images");
-      return;
-    }
-
-    if (
-      !ALLOWED_IMAGE_CONTENT_TYPES.includes(
-        file.type as (typeof ALLOWED_IMAGE_CONTENT_TYPES)[number],
-      )
-    ) {
-      setError("Only JPEG, PNG, WebP, and GIF images are allowed");
-      return;
-    }
-
-    if (file.size > MEDIA_MAX_BYTES) {
-      setError("Image must be 5 MB or smaller");
-      return;
-    }
-
-    setError("");
-    setUploading(true);
-
-    try {
-      const uploaded = await uploadChatMedia(session.token, {
-        roomId: activeRoomId,
-        file,
-      });
-
-      const sent = sendChatMessage({
-        text: "",
-        mediaKey: uploaded.key,
-        mediaContentType: uploaded.contentType,
-        mediaUrl: uploaded.url,
-      });
-
-      if (!sent) {
-        setUploading(false);
-        setError(
-          "Live connection is not ready. Run the app with npm run dev:server (Socket.IO).",
-        );
-      }
-    } catch (uploadError) {
-      setUploading(false);
-      const message =
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Could not upload image";
-
-      if (message === "Unauthorized") {
-        clearAuthSession();
-        routerRef.current.replace(AUTH_ROUTES.login);
-        return;
-      }
-
-      setError(message);
-    }
-  }
-
   return {
     messages,
     loading,
@@ -342,10 +348,13 @@ export function useChatMessages(): UseChatMessagesResult {
     joining,
     connected,
     activeRoomId,
+    currentUserId,
+    currentUser,
     joinedPeer,
     error,
     sendMessage,
-    sendImage,
+    sendFile,
+    deleteFile,
     joinPeerRoom,
   };
 }
