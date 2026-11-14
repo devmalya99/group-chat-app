@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAuthUserFromRequest } from "@/features/auth/utils/request-auth";
 import {
+  clampHistoryLimit,
   createMessage,
+  isValidBeforeCursor,
   listMessages,
 } from "@/features/chat/api/messages.service";
 import { MESSAGE_TYPE } from "@/features/chat/constants/chat.constants";
@@ -23,10 +25,30 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const roomId = searchParams.get("roomId")?.trim() || undefined;
+    const before = searchParams.get("before")?.trim() || undefined;
+    const beforeId = searchParams.get("beforeId")?.trim() || undefined;
+    const limitRaw = searchParams.get("limit");
+    const limit = clampHistoryLimit(
+      limitRaw ? Number.parseInt(limitRaw, 10) : undefined,
+    );
 
     if (!roomId) {
       return NextResponse.json(
         { message: "roomId is required" },
+        { status: 400 },
+      );
+    }
+
+    if ((before && !beforeId) || (!before && beforeId)) {
+      return NextResponse.json(
+        { message: "before and beforeId must be provided together" },
+        { status: 400 },
+      );
+    }
+
+    if (before && !isValidBeforeCursor(before)) {
+      return NextResponse.json(
+        { message: "Invalid before cursor" },
         { status: 400 },
       );
     }
@@ -38,9 +60,10 @@ export async function GET(request: Request) {
       );
     }
 
-    const rows = await listMessages(roomId);
+    const page = await listMessages({ roomId, limit, before, beforeId });
+
     const messages = await Promise.all(
-      rows.map(async (message) => {
+      page.messages.map(async (message) => {
         if (
           message.type !== MESSAGE_TYPE.media ||
           !message.mediaKey ||
@@ -62,7 +85,10 @@ export async function GET(request: Request) {
       }),
     );
 
-    return NextResponse.json({ messages }, { status: 200 });
+    return NextResponse.json(
+      { messages, hasMore: page.hasMore },
+      { status: 200 },
+    );
   } catch (error) {
     logger.error("List messages failed", {
       error: error instanceof Error ? error.message : "unknown",

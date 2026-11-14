@@ -3,6 +3,7 @@ const { parse } = require("url");
 const next = require("next");
 const { config } = require("dotenv");
 const { attachChatSocket } = require("./server/socket-io");
+const { startMessageArchiveCron } = require("./server/jobs/schedule-archive");
 
 config({ path: ".env.local" });
 
@@ -29,6 +30,7 @@ app
     });
 
     attachChatSocket(server, upgradeHandler);
+    startMessageArchiveCron();
 
     server.listen(port, () => {
       console.info(

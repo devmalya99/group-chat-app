@@ -19,6 +19,12 @@ export const DEMO_CONTACT: ChatContact = {
 
 export const MESSAGE_TEXT_MAX_LENGTH = 2000;
 
+/** Initial / scroll-up page size for room history (live + archive). */
+export const MESSAGE_HISTORY_PAGE_SIZE = 10;
+
+/** Hard cap for history page size (API + service). */
+export const MESSAGE_HISTORY_MAX_PAGE_SIZE = 50;
+
 export {
   FILE_MAX_BYTES_DEFAULT,
   FILE_MAX_BYTES_VIDEO,

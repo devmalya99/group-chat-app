@@ -1,8 +1,10 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/services/db";
-import { messages } from "@/services/db/schema";
+import { archivedMessages, messages } from "@/services/db/schema";
 import { logger } from "@/services/logging/logger";
 import {
+  MESSAGE_HISTORY_MAX_PAGE_SIZE,
+  MESSAGE_HISTORY_PAGE_SIZE,
   MESSAGE_TYPE,
   type MessageType,
 } from "../constants/chat.constants";
@@ -14,6 +16,38 @@ function toMessageType(value: string): MessageType {
 }
 
 function toStoredMessage(row: {
+  id: string;
+  room_id: string;
+  type: string;
+  text: string;
+  media_key: string | null;
+  media_content_type: string | null;
+  original_file_name: string | null;
+  sender_id: string;
+  created_at: Date | string;
+}): StoredMessage {
+  const createdAt =
+    row.created_at instanceof Date
+      ? row.created_at
+      : new Date(row.created_at);
+
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    type: toMessageType(row.type),
+    text: row.text,
+    mediaKey: row.media_key,
+    mediaContentType: row.media_content_type,
+    originalFileName: row.original_file_name,
+    fileCategory: row.media_content_type
+      ? getFileCategory(row.media_content_type)
+      : null,
+    senderId: row.sender_id,
+    createdAt: createdAt.toISOString(),
+  };
+}
+
+function toStoredMessageFromDrizzle(row: {
   id: string;
   roomId: string;
   type: string;
@@ -52,19 +86,113 @@ const messageSelect = {
   createdAt: messages.createdAt,
 };
 
-export async function listMessages(roomId?: string): Promise<StoredMessage[]> {
-  const rows = roomId
-    ? await db
-        .select(messageSelect)
-        .from(messages)
-        .where(eq(messages.roomId, roomId))
-        .orderBy(asc(messages.createdAt))
-    : await db
-        .select(messageSelect)
-        .from(messages)
-        .orderBy(asc(messages.createdAt));
+const archivedMessageSelect = {
+  id: archivedMessages.id,
+  roomId: archivedMessages.roomId,
+  type: archivedMessages.type,
+  text: archivedMessages.text,
+  mediaKey: archivedMessages.mediaKey,
+  mediaContentType: archivedMessages.mediaContentType,
+  originalFileName: archivedMessages.originalFileName,
+  senderId: archivedMessages.senderId,
+  createdAt: archivedMessages.createdAt,
+};
 
-  return rows.map(toStoredMessage);
+export function clampHistoryLimit(limit?: number): number {
+  const raw = limit ?? MESSAGE_HISTORY_PAGE_SIZE;
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return MESSAGE_HISTORY_PAGE_SIZE;
+  }
+  return Math.min(Math.floor(raw), MESSAGE_HISTORY_MAX_PAGE_SIZE);
+}
+
+export function isValidBeforeCursor(before: string): boolean {
+  return !Number.isNaN(new Date(before).getTime());
+}
+
+type HistoryRow = {
+  id: string;
+  room_id: string;
+  type: string;
+  text: string;
+  media_key: string | null;
+  media_content_type: string | null;
+  original_file_name: string | null;
+  sender_id: string;
+  created_at: Date | string;
+};
+
+export async function listMessages(input: {
+  roomId: string;
+  limit?: number;
+  before?: string;
+  beforeId?: string;
+}): Promise<{ messages: StoredMessage[]; hasMore: boolean }> {
+  const limit = clampHistoryLimit(input.limit);
+  const fetchLimit = limit + 1;
+  const useCursor = Boolean(input.before && input.beforeId);
+
+  if (useCursor && input.before && !isValidBeforeCursor(input.before)) {
+    throw new Error("Invalid before cursor");
+  }
+
+  const cursorClause = useCursor
+    ? sql`AND (created_at, id) < (${input.before!}::timestamptz, ${input.beforeId!}::uuid)`
+    : sql``;
+
+  const result = await db.execute(sql`
+    SELECT
+      id,
+      room_id,
+      type,
+      text,
+      media_key,
+      media_content_type,
+      original_file_name,
+      sender_id,
+      created_at
+    FROM (
+      SELECT
+        id,
+        room_id,
+        type,
+        text,
+        media_key,
+        media_content_type,
+        original_file_name,
+        sender_id,
+        created_at
+      FROM messages
+      WHERE room_id = ${input.roomId}
+      ${cursorClause}
+      UNION ALL
+      SELECT
+        id,
+        room_id,
+        type,
+        text,
+        media_key,
+        media_content_type,
+        original_file_name,
+        sender_id,
+        created_at
+      FROM archived_messages
+      WHERE room_id = ${input.roomId}
+      ${cursorClause}
+    ) AS combined
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${fetchLimit}
+  `);
+
+  const rows = result.rows as HistoryRow[];
+  const hasMore = rows.length > limit;
+  const pageDesc = hasMore ? rows.slice(0, limit) : rows;
+  const pageAsc = [...pageDesc].reverse();
+
+  return {
+    messages: pageAsc.map(toStoredMessage),
+    hasMore,
+  };
 }
 
 export async function createMessage(input: {
@@ -103,14 +231,14 @@ export async function createMessage(input: {
     type: created.type,
   });
 
-  return toStoredMessage(created);
+  return toStoredMessageFromDrizzle(created);
 }
 
 export async function getMessageInRoom(input: {
   messageId: string;
   roomId: string;
 }): Promise<StoredMessage | null> {
-  const [row] = await db
+  const [live] = await db
     .select(messageSelect)
     .from(messages)
     .where(
@@ -118,10 +246,47 @@ export async function getMessageInRoom(input: {
     )
     .limit(1);
 
-  return row ? toStoredMessage(row) : null;
+  if (live) {
+    return toStoredMessageFromDrizzle(live);
+  }
+
+  const [archived] = await db
+    .select(archivedMessageSelect)
+    .from(archivedMessages)
+    .where(
+      and(
+        eq(archivedMessages.id, input.messageId),
+        eq(archivedMessages.roomId, input.roomId),
+      ),
+    )
+    .limit(1);
+
+  return archived ? toStoredMessageFromDrizzle(archived) : null;
 }
 
 export async function deleteMessageById(messageId: string): Promise<void> {
-  await db.delete(messages).where(eq(messages.id, messageId));
-  logger.info("Message deleted", { messageId });
+  const deletedLive = await db
+    .delete(messages)
+    .where(eq(messages.id, messageId))
+    .returning({ id: messages.id });
+
+  if (deletedLive.length > 0) {
+    logger.info("Message deleted", { messageId, source: "messages" });
+    return;
+  }
+
+  const deletedArchived = await db
+    .delete(archivedMessages)
+    .where(eq(archivedMessages.id, messageId))
+    .returning({ id: archivedMessages.id });
+
+  if (deletedArchived.length > 0) {
+    logger.info("Message deleted", {
+      messageId,
+      source: "archived_messages",
+    });
+    return;
+  }
+
+  logger.warn("Message delete found no row", { messageId });
 }

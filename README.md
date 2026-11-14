@@ -119,11 +119,22 @@ All message endpoints require:
 Authorization: Bearer <jwt>
 ```
 
-### List messages (room-scoped)
+### List messages (room-scoped, paginated)
 
-`GET /api/messages?roomId=alice@email.com:bob@email.com`
+`GET /api/messages?roomId=alice@email.com:bob@email.com&limit=10`
 
-Caller must be a participant in `roomId`. Media rows include a short-lived signed `mediaUrl`.
+Optional cursor (scroll-up): `&before=<ISO createdAt>&beforeId=<uuid>`
+
+Response:
+
+```json
+{
+  "messages": [ /* oldest → newest within the page */ ],
+  "hasMore": true
+}
+```
+
+Default `limit` is 10 (max 50). History is merged from live `messages` and `archived_messages`. Caller must be a participant in `roomId`. Media rows include a short-lived signed `mediaUrl`.
 
 ### Send message (HTTP fallback)
 
@@ -326,13 +337,40 @@ Server → one client event `chat:error`:
 6. After delete, the bubble disappears for A; refresh B’s room history to confirm it’s gone.
 7. A third account that is not in the room cannot list or access those files.
 
+## Message archival
+
+Messages older than the configured cutoff are moved from `messages` → `archived_messages` by a `node-cron` job that runs **only** on `server.js` (not on `next dev` alone).
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `MESSAGE_ARCHIVE_CUTOFF_MS` | `86400000` (24h) | Age before archival; use `120000` (2 min) for local tests |
+| `MESSAGE_ARCHIVE_BATCH_SIZE` | `1000` | Rows moved per batch |
+| `MESSAGE_ARCHIVE_CRON` | `0 3 * * *` | Cron expression |
+| `MESSAGE_ARCHIVE_TZ` | `Asia/Kolkata` | Cron timezone |
+
+Manual run (no wait for cron):
+
+```bash
+npm run archive:once
+```
+
+Chat history pagination still returns archived rows. Scroll up in the UI to load older pages.
+
+### Manual check (archival)
+
+1. Set `MESSAGE_ARCHIVE_CUTOFF_MS=120000` in `.env.local` and restart `npm run dev:server`.
+2. Send a few messages, wait > 2 minutes, run `npm run archive:once`.
+3. Confirm those rows left `messages` and appear in `archived_messages` (Neon console / `db:studio`).
+4. Re-open the room: newest page still loads; scroll up to see archived history.
+
 ## Scripts
 
 | Command | Purpose |
 |---|---|
-| `npm run dev:server` | Custom Node server: Next + Socket.IO on one port |
+| `npm run dev:server` | Custom Node server: Next + Socket.IO + archive cron |
 | `npm run start:server` | Production custom server after `npm run build` |
-| `npm run dev` | Next only (no Socket.IO) |
+| `npm run archive:once` | Run message archival job once |
+| `npm run dev` | Next only (no Socket.IO / no archive cron) |
 | `npm run build` | Production build |
 | `npm run db:push` | Apply Drizzle schema to Neon |
 | `npx neon@latest deploy` | Sync Neon config / env |

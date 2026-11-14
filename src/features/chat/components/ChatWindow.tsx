@@ -12,6 +12,9 @@ export function ChatWindow() {
   const {
     messages,
     loading,
+    loadingMore,
+    hasMore,
+    scrollReason,
     sending,
     uploading,
     joining,
@@ -25,6 +28,8 @@ export function ChatWindow() {
     sendFile,
     deleteFile,
     joinPeerRoom,
+    loadOlderMessages,
+    clearScrollReason,
   } = useChatMessages();
 
   const contact: ChatContact = joinedPeer
@@ -91,6 +96,11 @@ export function ChatWindow() {
           <MessageList
             messages={messages}
             currentUserId={currentUserId}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            scrollReason={scrollReason}
+            onScrollReasonHandled={clearScrollReason}
+            onLoadOlder={loadOlderMessages}
             onDeleteFile={deleteFile}
           />
         )}

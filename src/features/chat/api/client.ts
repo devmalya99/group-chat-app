@@ -1,5 +1,6 @@
 import type {
   CreateMessagePayload,
+  FetchMessagesOptions,
   FileUploadResponse,
   LookupUser,
   LookupUserResponse,
@@ -34,24 +35,27 @@ function authHeaders(token: string): HeadersInit {
 
 export async function fetchMessages(
   token: string,
-  roomId?: string,
-): Promise<StoredMessage[]> {
-  const params = new URLSearchParams();
-  if (roomId) {
-    params.set("roomId", roomId);
+  options: FetchMessagesOptions,
+): Promise<MessagesListResponse> {
+  const params = new URLSearchParams({
+    roomId: options.roomId,
+  });
+
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
   }
 
-  const query = params.toString();
-  const response = await fetch(
-    query ? `/api/messages?${query}` : "/api/messages",
-    {
-      method: "GET",
-      headers: authHeaders(token),
-    },
-  );
+  if (options.before && options.beforeId) {
+    params.set("before", options.before);
+    params.set("beforeId", options.beforeId);
+  }
 
-  const data = await parseJsonResponse<MessagesListResponse>(response);
-  return data.messages;
+  const response = await fetch(`/api/messages?${params.toString()}`, {
+    method: "GET",
+    headers: authHeaders(token),
+  });
+
+  return parseJsonResponse<MessagesListResponse>(response);
 }
 
 export async function sendMessageRequest(

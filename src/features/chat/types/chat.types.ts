@@ -47,6 +47,16 @@ export interface StoredMessage {
 
 export interface MessagesListResponse {
   messages: StoredMessage[];
+  hasMore: boolean;
+}
+
+export interface FetchMessagesOptions {
+  roomId: string;
+  limit?: number;
+  /** ISO createdAt of the oldest message already loaded (scroll-up cursor). */
+  before?: string;
+  /** Id tie-breaker for the `before` cursor. */
+  beforeId?: string;
 }
 
 export interface CreateMessagePayload {

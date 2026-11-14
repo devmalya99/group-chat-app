@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AUTH_ROUTES } from "@/features/auth/constants/auth.constants";
 import {
   clearAuthSession,
   getAuthSession,
 } from "@/features/auth/utils/session";
-import { fetchMessages, lookupUserByEmail } from "../api/client";
+import { lookupUserByEmail } from "../api/client";
 import { MESSAGE_TYPE } from "../constants/chat.constants";
 import type {
   ChatFileDeletedPayload,
@@ -18,6 +18,10 @@ import type {
 import { buildRoomId } from "../utils/buildRoomId";
 import { mapStoredMessage } from "../utils/mapStoredMessage";
 import { lookupEmailSchema } from "../utils/validation";
+import {
+  useChatHistory,
+  type HistoryScrollReason,
+} from "./useChatHistory";
 import { useChatFileSharing } from "./useChatFileSharing";
 import { useChatSocket } from "./useChatSocket";
 
@@ -30,6 +34,9 @@ interface ChatSelfUser {
 interface UseChatMessagesResult {
   messages: ChatMessage[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  scrollReason: HistoryScrollReason | null;
   sending: boolean;
   uploading: boolean;
   joining: boolean;
@@ -43,6 +50,8 @@ interface UseChatMessagesResult {
   sendFile: (file: File) => Promise<void>;
   deleteFile: (messageId: string) => Promise<void>;
   joinPeerRoom: (peerEmail: string) => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
+  clearScrollReason: () => void;
 }
 
 export function useChatMessages(): UseChatMessagesResult {
@@ -55,12 +64,13 @@ export function useChatMessages(): UseChatMessagesResult {
     | ((token: string, roomId: string, key: string) => Promise<string | null>)
     | null
   >(null);
+  const appendMessageRef = useRef<(message: ChatMessage) => void>(() => {});
+  const removeMessageRef = useRef<(messageId: string) => void>(() => {});
 
   const [token, setToken] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<ChatSelfUser | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -80,6 +90,15 @@ export function useChatMessages(): UseChatMessagesResult {
     tokenRef.current = token;
   }, [token]);
 
+  const onUnauthorized = useCallback(() => {
+    clearAuthSession();
+    routerRef.current.replace(AUTH_ROUTES.login);
+  }, []);
+
+  const onHistoryError = useCallback((message: string) => {
+    setError(message);
+  }, []);
+
   useEffect(() => {
     const session = getAuthSession();
 
@@ -96,7 +115,6 @@ export function useChatMessages(): UseChatMessagesResult {
       email: session.user.email,
     });
     setCurrentUserEmail(session.user.email);
-    setMessages([]);
     setLoading(false);
   }, []);
 
@@ -130,13 +148,7 @@ export function useChatMessages(): UseChatMessagesResult {
         next = { ...stored, mediaUrl };
       }
 
-      setMessages((current) => {
-        if (current.some((message) => message.id === next.id)) {
-          return current;
-        }
-
-        return [...current, mapStoredMessage(next, userId)];
-      });
+      appendMessageRef.current(mapStoredMessage(next, userId));
       setSending(false);
       setUploading(false);
     })();
@@ -151,9 +163,7 @@ export function useChatMessages(): UseChatMessagesResult {
       return;
     }
 
-    setMessages((current) =>
-      current.filter((message) => message.id !== payload.messageId),
-    );
+    removeMessageRef.current(payload.messageId);
   });
 
   const onSocketErrorRef = useRef((message: string) => {
@@ -181,6 +191,30 @@ export function useChatMessages(): UseChatMessagesResult {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
 
+  const {
+    messages,
+    hasMore,
+    loadingMore,
+    scrollReason,
+    clearScrollReason,
+    setMessages,
+    appendMessage,
+    removeMessage,
+    reset: resetHistory,
+    loadOlderMessages,
+  } = useChatHistory({
+    token,
+    roomId: activeRoomId,
+    currentUserId,
+    onUnauthorized,
+    onError: onHistoryError,
+  });
+
+  useEffect(() => {
+    appendMessageRef.current = appendMessage;
+    removeMessageRef.current = removeMessage;
+  }, [appendMessage, removeMessage]);
+
   const { sendFile, deleteFile, resolveFileUrl } = useChatFileSharing({
     activeRoomId,
     messages,
@@ -194,50 +228,6 @@ export function useChatMessages(): UseChatMessagesResult {
   useEffect(() => {
     resolveFileUrlRef.current = resolveFileUrl;
   }, [resolveFileUrl]);
-
-  useEffect(() => {
-    if (!token || !activeRoomId || !currentUserId) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadRoomHistory() {
-      try {
-        const history = await fetchMessages(token!, activeRoomId!);
-        if (cancelled) {
-          return;
-        }
-
-        setMessages(
-          history.map((message) => mapStoredMessage(message, currentUserId!)),
-        );
-      } catch (historyError) {
-        if (cancelled) {
-          return;
-        }
-
-        const message =
-          historyError instanceof Error
-            ? historyError.message
-            : "Could not load room messages";
-
-        if (message === "Unauthorized") {
-          clearAuthSession();
-          routerRef.current.replace(AUTH_ROUTES.login);
-          return;
-        }
-
-        setError(message);
-      }
-    }
-
-    void loadRoomHistory();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token, activeRoomId, currentUserId]);
 
   async function joinPeerRoom(peerEmail: string) {
     const session = getAuthSession();
@@ -284,7 +274,7 @@ export function useChatMessages(): UseChatMessagesResult {
 
       const roomId = buildRoomId(myEmail, peerEmailNormalized);
 
-      setMessages([]);
+      resetHistory();
       setJoinedPeer(null);
 
       const joined = joinRoom(roomId);
@@ -303,8 +293,7 @@ export function useChatMessages(): UseChatMessagesResult {
         joinError instanceof Error ? joinError.message : "Could not join room";
 
       if (message === "Unauthorized") {
-        clearAuthSession();
-        routerRef.current.replace(AUTH_ROUTES.login);
+        onUnauthorized();
         return;
       }
 
@@ -343,6 +332,9 @@ export function useChatMessages(): UseChatMessagesResult {
   return {
     messages,
     loading,
+    loadingMore,
+    hasMore,
+    scrollReason,
     sending,
     uploading,
     joining,
@@ -356,5 +348,7 @@ export function useChatMessages(): UseChatMessagesResult {
     sendFile,
     deleteFile,
     joinPeerRoom,
+    loadOlderMessages,
+    clearScrollReason,
   };
 }
